@@ -92,3 +92,60 @@ export async function addProductsToCollection(store: StoreAuth, collectionId: st
   const errs = (r.data.collectionAddProducts.userErrors || []).filter((e) => !/already/i.test(e.message));
   assertNoUserErrors(`collectionAddProducts`, errs);
 }
+
+// ── Files and themes (part 2) ────────────────────────────────
+export interface FileCreated { id: string; filename: string; url: string | null; status: string }
+
+// Upload a public image URL into Content > Files under a fixed filename (REPLACE: the same name
+// again overwrites, so settings that point at it stay valid). Returns once Shopify reports it ready
+// (polls up to ~20 s), with the file's CDN url when known.
+export async function fileCreateFromUrl(store: StoreAuth, originalSource: string, filename: string, alt: string, opts?: ClientOptions): Promise<FileCreated> {
+  const r = await shopifyGraphql<{ fileCreate: { files: { id: string; fileStatus: string; alt: string | null }[]; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderFileCreate($files: [FileCreateInput!]!) {
+      fileCreate(files: $files) { files { id fileStatus alt } userErrors { field message } }
+    }`, { files: [{ originalSource, contentType: 'IMAGE', alt, filename, duplicateResolutionMode: 'REPLACE' }] }, opts);
+  assertNoUserErrors(`fileCreate ${filename}`, r.data.fileCreate.userErrors);
+  const f = r.data.fileCreate.files[0];
+  if (!f) throw new Error(`fileCreate ${filename}: nothing returned`);
+  let status = f.fileStatus, url: string | null = null;
+  for (let i = 0; i < 10 && status !== 'READY' && status !== 'FAILED'; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const q = await shopifyGraphql<{ node: { fileStatus: string; image?: { url: string } | null } | null }>(store, `
+      query BuilderFile($id: ID!) { node(id: $id) { ... on MediaImage { fileStatus image { url } } } }`, { id: f.id }, opts);
+    status = q.data.node?.fileStatus || status; url = q.data.node?.image?.url || null;
+  }
+  if (status === 'FAILED') throw new Error(`Shopify could not process the image ${filename}`);
+  return { id: f.id, filename, url, status };
+}
+
+export interface ThemeInfo { id: string; name: string; role: string; processing: boolean }
+
+export async function listThemes(store: StoreAuth, opts?: ClientOptions): Promise<ThemeInfo[]> {
+  const r = await shopifyGraphql<{ themes: { nodes: { id: string; name: string; role: string; processing: boolean }[] } }>(store, `
+    query BuilderThemes { themes(first: 30) { nodes { id name role processing } } }`, {}, opts);
+  return r.data.themes.nodes;
+}
+
+// Create an unpublished theme from a public zip URL. Shopify unpacks it in the background.
+export async function themeCreateFromUrl(store: StoreAuth, zipUrl: string, name: string, opts?: ClientOptions): Promise<ThemeInfo> {
+  const r = await shopifyGraphql<{ themeCreate: { theme: { id: string; name: string; role: string; processing: boolean } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderThemeCreate($source: URL!, $name: String!) {
+      themeCreate(source: $source, name: $name, role: UNPUBLISHED) { theme { id name role processing } userErrors { field message } }
+    }`, { source: zipUrl, name }, opts);
+  assertNoUserErrors('themeCreate', r.data.themeCreate.userErrors);
+  const t = r.data.themeCreate.theme;
+  if (!t) throw new Error('themeCreate returned no theme');
+  return t;
+}
+
+export async function themeStatus(store: StoreAuth, themeId: string, opts?: ClientOptions): Promise<ThemeInfo | null> {
+  const r = await shopifyGraphql<{ theme: { id: string; name: string; role: string; processing: boolean } | null }>(store, `
+    query BuilderTheme($id: ID!) { theme(id: $id) { id name role processing } }`, { id: themeId }, opts);
+  return r.data.theme;
+}
+
+export async function themePublish(store: StoreAuth, themeId: string, opts?: ClientOptions): Promise<void> {
+  const r = await shopifyGraphql<{ themePublish: { theme: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderThemePublish($id: ID!) { themePublish(id: $id) { theme { id } userErrors { field message } } }`, { id: themeId }, opts);
+  assertNoUserErrors('themePublish', r.data.themePublish.userErrors);
+}
