@@ -9,6 +9,7 @@ export interface SiteRead {
   nav: { text: string; href: string }[];
   headings: { tag: string; text: string }[];
   sectionTypes: string[];            // e.g. image-banner, featured-collection, multicolumn (Shopify themes)
+  sections: SiteSection[];           // EVERY section of the home page in order, header to footer, with what it holds
   colors: { value: string; count: number }[];
   fonts: string[];
   imageCount: number;
@@ -17,6 +18,19 @@ export interface SiteRead {
   products: { title: string; type: string; vendor: string; price: string; tags: string[] }[];
   textSample: string;                // ~2500 chars of visible text, for the tone only
   errors: string[];
+}
+
+// One section of the reference home page: its type and what it holds (counts, headings, the kind of text).
+export interface SiteSection {
+  place: 'header' | 'main' | 'footer';
+  type: string;              // normalised section type (slideshow, collection-list, marquee ...) or 'section' when not a Shopify theme
+  headings: string[];        // up to 4
+  text: string;              // up to 220 characters of its visible text (for understanding only, never reused)
+  items: string[];           // the running bar's phrases / the tiles' link texts, up to 12
+  collections: number;       // distinct /collections/<handle> links (category tiles)
+  products: number;          // distinct /products/<handle> links (product grid)
+  images: number; videos: number; buttons: number;
+  marquee: boolean;          // a running / scrolling text bar
 }
 
 const MAX_BYTES = 1_500_000;
@@ -51,6 +65,55 @@ export function normalizeUrl(input: string): string | null {
 
 const decode = (s: string) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 const stripTags = (s: string) => decode(s.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+const SKIP_SECTIONS = ['cart-drawer', 'cart-notification', 'cart-icon-bubble', 'predictive-search', 'cart', 'popup', 'popups', 'cookie', 'age-verification', 'search-drawer', 'mobile-menu', 'drawer', 'mini-cart'];
+const normalType = (raw: string): string => {
+  // featured_collection_AbC123 -> featured-collection: a trailing segment with digits, or a mixed-case
+  // one (the editor's random ids), is Shopify's id, not the type.
+  const parts = raw.split(/[_-]/);
+  const isId = (seg: string) => /\d/.test(seg) || (/[A-Z]/.test(seg) && /[a-z]/.test(seg));
+  while (parts.length > 1 && isId(parts[parts.length - 1])) parts.pop();
+  return parts.join('-').toLowerCase();
+};
+const distinct = (re: RegExp, s: string, group = 1): string[] => Array.from(new Set(Array.from(s.matchAll(re)).map((m) => m[group].toLowerCase())));
+
+// Every section of the home page in order: Shopify sections by their ids (header group, template, footer
+// group), else the page's <section> elements. Each one is read for what it holds, never for reuse.
+export function parseSections(html: string): SiteSection[] {
+  const body = (html.match(/<body[\s\S]*$/i) || [html])[0].replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ');
+  let marks = Array.from(body.matchAll(/id=["']shopify-section-([a-z0-9_-]+)["']/gi)).map((m) => ({ at: body.lastIndexOf('<', m.index || 0), id: m[1], shopify: true }));
+  if (!marks.length) marks = Array.from(body.matchAll(/<section\b/gi)).map((m) => ({ at: m.index || 0, id: 'section', shopify: false }));
+  const out: SiteSection[] = [];
+  let seenMain = false;
+  for (let i = 0; i < marks.length && out.length < 40; i++) {
+    const { at, id, shopify } = marks[i];
+    const slice = body.slice(at, i + 1 < marks.length ? marks[i + 1].at : undefined).slice(0, 300_000);
+    const type = shopify ? normalType(id.replace(/^(template|sections)--[^_]+__/, '')) : 'section';
+    if (SKIP_SECTIONS.includes(type) || SKIP_SECTIONS.some((s) => type.endsWith('-' + s))) continue;
+    const isTemplate = /^template--/.test(id) || !shopify;
+    if (isTemplate) seenMain = true;
+    const place: SiteSection['place'] = isTemplate ? 'main' : (seenMain || /footer/.test(type) ? 'footer' : 'header');
+    const headings = Array.from(slice.matchAll(/<(h[1-3])[^>]*>([\s\S]*?)<\/\1>/gi)).map((m) => stripTags(m[2]).slice(0, 100)).filter(Boolean).slice(0, 4);
+    const text = stripTags(slice).slice(0, 220);
+    const marquee = /class=["'][^"']*(marquee|ticker|scrolling[-_]text|running[-_]text|scroll[-_]text|text[-_]scroll)/i.test(slice) || /marquee|ticker|scrolling|running-text/.test(type);
+    const linkTexts = Array.from(new Set(Array.from(slice.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)).map((m) => stripTags(m[1]).slice(0, 50)).filter((t) => t && t.length > 1)));
+    let items: string[] = [];
+    if (marquee) {
+      const inner = stripTags((slice.match(/<[^>]+class=["'][^"']*(?:marquee|ticker|scrolling|running)[^"']*["'][\s\S]*$/i) || [slice])[0]).slice(0, 2000);
+      items = Array.from(new Set(inner.split(/\s*(?:[|•·★✦✧♥❤✓✔→›»—–]|\s{2,})\s*/).map((x) => x.trim()).filter((x) => x.length > 1 && x.length <= 60)));
+    } else items = linkTexts;
+    out.push({
+      place, type, headings, text, items: items.slice(0, 12),
+      collections: distinct(/href=["'][^"']*\/collections\/([a-z0-9-]+)(?:[/?#"']|$)/gi, slice).filter((h) => h !== 'all').length,
+      products: distinct(/href=["'][^"']*\/products\/([a-z0-9-]+)(?:[/?#"']|$)/gi, slice).length,
+      images: (slice.match(/<img\b/gi) || []).length,
+      videos: Math.max((slice.match(/<video\b|<iframe[^>]+(youtube|vimeo)/gi) || []).length, (slice.match(/\.mp4\b/gi) || []).length),
+      buttons: (slice.match(/<button\b|<a[^>]+class=["'][^"']*\b(btn|button)/gi) || []).length,
+      marquee,
+    });
+  }
+  return out;
+}
 
 export function parseHtml(html: string, baseUrl: string): Omit<SiteRead, 'url' | 'finalUrl' | 'policies' | 'collections' | 'products' | 'errors' | 'colors' | 'fonts'> & { stylesheets: string[]; inlineCss: string; policyLinks: string[]; colorsRaw: string; } {
   const title = stripTags((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').slice(0, 200);
@@ -96,7 +159,8 @@ export function parseHtml(html: string, baseUrl: string): Omit<SiteRead, 'url' |
   const policyLinks = Array.from(new Set(Array.from(html.matchAll(/href=["']([^"']*\/policies\/[a-z-]+)["']/gi)).map((m) => absolute(m[1], baseUrl)))).slice(0, 6);
   const imageCount = (html.match(/<img\b/gi) || []).length;
   const textSample = stripTags((html.match(/<main[\s\S]*?<\/main>/i) || html.match(/<body[\s\S]*?<\/body>/i) || [html])[0]).slice(0, 2500);
-  return { title, description, isShopify, nav, headings, sectionTypes, stylesheets, inlineCss, policyLinks, imageCount, textSample, colorsRaw: '' };
+  const sections = parseSections(html);
+  return { title, description, isShopify, nav, headings, sectionTypes, sections, stylesheets, inlineCss, policyLinks, imageCount, textSample, colorsRaw: '' };
 }
 
 function absolute(href: string, base: string): string {
@@ -167,5 +231,5 @@ export async function readSite(inputUrl: string): Promise<SiteRead> {
       else errors.push(`products.json answered ${r.status}`);
     } catch (e) { errors.push(`products.json: ${(e as Error).message}`); }
   }
-  return { url, finalUrl: page.finalUrl, title: parsed.title, description: parsed.description, isShopify: parsed.isShopify, nav: parsed.nav, headings: parsed.headings, sectionTypes: parsed.sectionTypes, colors, fonts, imageCount: parsed.imageCount, policies, collections, products, textSample: parsed.textSample, errors };
+  return { url, finalUrl: page.finalUrl, title: parsed.title, description: parsed.description, isShopify: parsed.isShopify, nav: parsed.nav, headings: parsed.headings, sectionTypes: parsed.sectionTypes, sections: parsed.sections, colors, fonts, imageCount: parsed.imageCount, policies, collections, products, textSample: parsed.textSample, errors };
 }

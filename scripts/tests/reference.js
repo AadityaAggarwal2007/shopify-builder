@@ -32,6 +32,37 @@ t('parseHtml: title, nav, headings, Shopify section types, stylesheets, policy l
   assert.ok(!p.textSample.includes('cdn.shopify'));
 });
 
+t('parseSections: every Shopify section in order with its place, counts, headings, running-bar items', () => {
+  const html = `<html><body>
+  <div id="shopify-section-sections--9__announcement-bar" class="shopify-section"><p>Free shipping above 999</p></div>
+  <div id="shopify-section-sections--9__marquee_kWqHpT" class="shopify-section"><div class="marquee__content"><span>Premium quality</span> • <span>Unique</span> • <span>Comfy</span> • <span>Premium quality</span></div></div>
+  <div id="shopify-section-sections--9__header" class="shopify-section"><a href="/">Home</a></div>
+  <main>
+  <div id="shopify-section-template--5__slideshow_AbC9" class="shopify-section"><img src="1.jpg"><img src="2.jpg"><img src="3.jpg"><a class="button" href="/collections/all">Shop</a><h2>Festive sale</h2></div>
+  <div id="shopify-section-template--5__collection_list_q1" class="shopify-section"><h2>Shop by categories</h2>${['rings', 'jhumkas', 'bangles', 'sets', 'anklets', 'chains'].map((h) => `<a href="/collections/${h}"><img src="${h}.jpg">${h[0].toUpperCase() + h.slice(1)}</a>`).join('')}<a href="/collections/rings">Rings again</a></div>
+  <div id="shopify-section-template--5__video_k7x2" class="shopify-section"><video src="a.mp4"></video></div>
+  <div id="shopify-section-template--5__featured_collection_z9" class="shopify-section"><h2>All products</h2>${Array.from({ length: 12 }, (_, i) => `<a href="/products/p${i}">P${i}</a>`).join('')}</div>
+  <div id="shopify-section-template--5__cart-drawer" class="shopify-section"></div>
+  </main>
+  <div id="shopify-section-sections--7__footer" class="shopify-section"><p>About us</p></div>
+  <script>var x = '<div id="shopify-section-template--5__fake">';</script></body></html>`;
+  const s = rs.parseSections(html);
+  assert.deepStrictEqual(s.map((x) => `${x.place}:${x.type}`), ['header:announcement-bar', 'header:marquee', 'header:header', 'main:slideshow', 'main:collection-list', 'main:video', 'main:featured-collection', 'footer:footer'], 'cart drawer and script text skipped');
+  assert.strictEqual(s[1].marquee, true);
+  assert.deepStrictEqual(s[1].items, ['Premium quality', 'Unique', 'Comfy'], 'running bar phrases, repeats folded');
+  assert.strictEqual(s[3].images, 3); assert.strictEqual(s[3].buttons, 1); assert.deepStrictEqual(s[3].headings, ['Festive sale']);
+  assert.strictEqual(s[4].collections, 6, 'distinct category links, /collections/all never counts');
+  assert.strictEqual(s[4].items.length, 7);
+  assert.strictEqual(s[5].videos, 1);
+  assert.strictEqual(s[6].products, 12);
+  assert.ok(s[0].text.includes('Free shipping'));
+  const plain = rs.parseSections('<html><body><section><h2>One</h2></section><section><h2>Two</h2><a href="/products/x">x</a></section></body></html>');
+  assert.deepStrictEqual(plain.map((x) => x.type), ['section', 'section'], 'a non-Shopify page falls back to <section> elements');
+  assert.strictEqual(plain[1].products, 1);
+  const p = rs.parseHtml(html, 'https://x.example/');
+  assert.strictEqual(p.sections.length, 8, 'parseHtml carries the sections');
+});
+
 t('extractColorsAndFonts: hex short/long, rgb, frequency order; generic fonts dropped', () => {
   const r = rs.extractColorsAndFonts(`.a{color:#F00;background:#ff0000;border-color:rgb(255,0,0)} .b{color:#123456;font-family:"Playfair Display", serif} .c{font-family:Inter,sans-serif} .d{font-family:var(--font)}`);
   assert.deepStrictEqual(r.colors[0], { value: '#ff0000', count: 3 });
@@ -46,6 +77,10 @@ t('parseStyleSheet: keeps known sections, hex colours, caps; refuses junk', () =
   assert.strictEqual(ok.palette.background, '#ffffff', 'non-hex falls back');
   assert.strictEqual(ok.fonts.body, 'Inter', 'missing font gets the default');
   assert.deepStrictEqual(ok.sections, [{ type: 'hero-banner', title: 'Hi', note: 'big photo' }]);
+  const rich = ss.parseStyleSheet(JSON.stringify({ sections: [{ type: 'marquee', title: 'Bar', note: 'runs', count: '4', items: ['Fast delivery', '', 'Easy returns', 7] }, { type: 'collection-list', title: 'Shop', note: 'tiles', count: 99 }] }), 'F');
+  assert.deepStrictEqual(rich.sections[0], { type: 'marquee', title: 'Bar', note: 'runs', count: 4, items: ['Fast delivery', 'Easy returns'] });
+  assert.deepStrictEqual(rich.sections[1], { type: 'collection-list', title: 'Shop', note: 'tiles' }, 'a count over 50 is dropped');
+  assert.ok(ss.SECTION_TYPES.includes('trust-badges') && ss.SECTION_TYPES.includes('product-grid') && ss.SECTION_TYPES.includes('announcement-bar'));
   assert.deepStrictEqual(ok.collections, [{ title: 'Jhumkas', note: 'oxidised' }]);
   assert.throws(() => ss.parseStyleSheet('no json here', 'F'), /style sheet/);
   assert.throws(() => ss.parseStyleSheet('{"sections":[]}', 'F'), /no usable/);
@@ -54,9 +89,11 @@ t('parseStyleSheet: keeps known sections, hex colours, caps; refuses junk', () =
 });
 
 t('stylePrompt never asks to copy and carries the merchant facts', () => {
-  const site = { url: 'u', finalUrl: 'https://ref.example/', title: 'Ref', description: '', isShopify: true, nav: [{ text: 'Shop', href: '' }], headings: [], sectionTypes: ['image-banner'], colors: [{ value: '#112233', count: 9 }], fonts: ['Lato'], imageCount: 3, policies: [], collections: [{ title: 'Rings', handle: 'rings' }], products: [], textSample: 'hello', errors: [] };
+  const site = { url: 'u', finalUrl: 'https://ref.example/', title: 'Ref', description: '', isShopify: true, nav: [{ text: 'Shop', href: '' }], headings: [], sectionTypes: ['image-banner'], sections: [{ place: 'header', type: 'marquee', headings: [], text: 'Premium quality', items: ['Premium quality', 'Comfy'], collections: 0, products: 0, images: 0, videos: 0, buttons: 0, marquee: true }, { place: 'main', type: 'collection-list', headings: ['Shop by categories'], text: '', items: [], collections: 6, products: 0, images: 6, videos: 0, buttons: 0, marquee: false }], colors: [{ value: '#112233', count: 9 }], fonts: ['Lato'], imageCount: 3, policies: [], collections: [{ title: 'Rings', handle: 'rings' }], products: [], textSample: 'hello', errors: [] };
   const p = ss.stylePrompt(site, { storeName: 'My Store', productTypes: ['Bangles'], sampleTitles: ['Pink bangle set'] });
   assert.ok(p.includes("Merchant's store name: My Store") && p.includes('Bangles') && p.includes('#112233') && p.includes('Lato'));
+  assert.ok(p.includes('#1 [header] marquee (RUNNING TEXT BAR)') && p.includes('#2 [main] collection-list (6 category links, 6 images)') && p.includes('"Shop by categories"'), 'one line per reference section with its counts');
+  assert.ok(/ONE entry per section/.test(ss.STYLE_SYSTEM) && /trust-badges/.test(ss.STYLE_SYSTEM));
   assert.ok(/Never copy/.test(ss.STYLE_SYSTEM));
 });
 

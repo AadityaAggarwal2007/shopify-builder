@@ -97,7 +97,7 @@ export function validatePlan(raw: unknown, theme: ThemeSummary, assets: PlanAsse
       blocks.push({ type: bdef.type, settings: checkSettings(bdef.settings, b.settings, assets, notes) });
     }
     sections.push({ type, settings: checkSettings(def.settings, s.settings, assets, notes), blocks });
-    if (sections.length >= 12) break;
+    if (sections.length >= 24) break;
   }
   if (!sections.length) throw new Error('The AI proposed no section this theme has');
   // Header / footer groups: only settings of sections that already exist in the group, by key.
@@ -114,6 +114,7 @@ export function validatePlan(raw: unknown, theme: ThemeSummary, assets: PlanAsse
       if (Object.keys(checked).length) (groups[file] ||= {})[key] = checked;
     }
   }
+  for (const n of (Array.isArray(j.notes) ? j.notes : []).slice(0, 10)) if (typeof n === 'string' && n.trim()) notes.push(`AI: ${n.trim().slice(0, 160)}`);
   return { settings, sections, groups, notes };
 }
 
@@ -126,9 +127,9 @@ function describeSettings(defs: SettingDef[], max: number): string {
 }
 
 export const PLAN_SYSTEM = `You fill a Shopify theme's settings for a merchant so the home page looks like a given style sheet. You get the theme's REAL setting ids and section types; use ONLY those ids and types, exactly as written. Output one JSON object, nothing else:
-{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}],"groups":{"<group file>":{"<section key>":{"<id>":<value>}}}}
+{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}],"groups":{"<group file>":{"<section key>":{"<id>":<value>}}},"notes":["<a style-sheet section this theme cannot show, and why>"]}
 Values: colours as "#rrggbb"; fonts as the font NAME (e.g. "Poppins"); images as "banner:<slot>" using only the slots listed; collections as the handle listed; products as the handle listed; text in English, short, the merchant's own (never the reference's words); booleans as true/false; select options exactly as listed.
-Sections: 5 to 9, in the style sheet's order, mapping each style-sheet section to the closest theme section type (hero-banner -> an image banner / slideshow type; featured-collection -> a featured collection type with one of the listed collections; collection-list -> a collection list with 3-6 listed collections; rich-text -> rich text; multicolumn -> multicolumn with 3 blocks of short benefits; image-with-text -> image with text using a banner slot; testimonials -> multicolumn or rich text; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter). Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings; a collection list / collection block MUST carry its collection setting with a listed handle, one different collection per block, and a featured-collection section its collection too. groups: the header / footer sections the theme already has, by their key: set the logo (an image_picker named logo -> "banner:logo" when that slot exists), the announcement bar text to one short offer line in the merchant tone, the footer text / newsletter heading; change nothing else there. Leave a setting out rather than guess. Never invent an id.`;
+Sections: ONE theme section per style-sheet section, in the style sheet's order (up to 20; skip a style-sheet section only when this theme has no section type for it, and say so in a "notes" list). Map each to the closest theme section type: hero-banner -> image banner; slideshow -> slideshow with one slide block per listed hero slot (count slides); featured-collection -> featured collection with one listed collection; collection-list -> a collection list with as many collection blocks as the style sheet's count, one listed collection each (reuse collections if there are fewer); product-grid -> a featured collection / product grid with the collection "all" and the count as products to show; promo-banners -> a multi-image banner / collage / image grid with one banner slot per image; image-banner -> image banner with a banner slot; image-with-text -> image with text with a banner slot; before-after -> a compare / before-after section if the theme has one, else image with text; trust-badges -> an icon / multicolumn / text-columns section with one block per item, each block's text from the style sheet's items; multicolumn -> multicolumn with one block per item; rich-text -> rich text; video -> a video section only if the theme has one; marquee -> a scrolling / marquee / ticker text section with one block per item if the theme has one; announcement-bar -> NOT a home section: its items go into the header group's announcement bar; testimonials -> testimonials / reviews section or multicolumn; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter; logo-list / countdown / social-feed / blog -> only if the theme has such a section. Use the style sheet's count and items; text in the merchant's own voice. Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings; a collection list / collection block MUST carry its collection setting with a listed handle, one different collection per block, and a featured-collection section its collection too. groups: the header / footer sections the theme already has, by their key: set the logo (an image_picker named logo -> "banner:logo" when that slot exists), the announcement bar text to one short offer line in the merchant tone, the footer text / newsletter heading; change nothing else there. Leave a setting out rather than guess. Never invent an id.`;
 
 export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanAssets, storeName: string): string {
   const globals = theme.settings.filter((d) => RELEVANT_GLOBAL.has(d.type) && (d.type !== 'text' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'range' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'checkbox' || GLOBAL_ID_HINT.test(d.id)));
@@ -145,7 +146,7 @@ export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanA
     '',
     `THEME: ${theme.name} ${theme.version}`,
     `GLOBAL SETTINGS you may set: ${describeSettings(globals, 80)}`,
-    `SECTION TYPES you may use on the home page:`, ...sectionLines.slice(0, 40),
+    `SECTION TYPES you may use on the home page:`, ...sectionLines.slice(0, 80),
     ...groupLines(theme),
   ].join('\n');
 }

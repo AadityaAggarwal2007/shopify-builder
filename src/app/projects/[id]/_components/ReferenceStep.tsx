@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Globe, Save, Trash2 } from 'lucide-react';
 import { api, fmtWhen } from '@/lib/client';
+import { SECTION_MEANING, SECTION_TYPES } from '@/lib/reference/style-sheet';
 
-type Section = { type: string; title: string; note: string };
+type Section = { type: string; title: string; note: string; count?: number; items?: string[] };
 interface StyleSheet {
   brand: { name: string; tagline: string };
   palette: { primary: string; secondary: string; accent: string; background: string; text: string };
@@ -11,8 +12,8 @@ interface StyleSheet {
   tone: string; sections: Section[]; collections: { title: string; note: string }[]; offers: string[];
   policies: { shipping: string; refund: string };
 }
-interface Read { finalUrl: string; title: string; isShopify: boolean; sectionTypes: string[]; colors: { value: string; count: number }[]; fonts: string[]; collections: { title: string }[]; nav: { text: string }[]; errors: string[] }
-const SECTION_TYPES = ['hero-banner', 'featured-collection', 'collection-list', 'rich-text', 'multicolumn', 'image-with-text', 'slideshow', 'testimonials', 'faq', 'newsletter', 'video', 'image-banner'];
+interface ReadSection { place: string; type: string; headings: string[]; items: string[]; collections: number; products: number; images: number; videos: number; buttons: number; marquee: boolean }
+interface Read { finalUrl: string; title: string; isShopify: boolean; sectionTypes: string[]; sections?: ReadSection[]; colors: { value: string; count: number }[]; fonts: string[]; collections: { title: string }[]; nav: { text: string }[]; errors: string[] }
 
 // Step 2: a reference website -> the style sheet (structure, colours, fonts, tone); the owner edits it.
 export default function ReferenceStep({ projectId, onChange }: { projectId: string; onChange: () => void }) {
@@ -65,7 +66,14 @@ export default function ReferenceStep({ projectId, onChange }: { projectId: stri
             <summary className="muted small" style={{ cursor: 'pointer' }}>What the reader found</summary>
             <div className="small" style={{ marginTop: 6 }}>
               <div><b>Menu:</b> {read.nav.map((n) => n.text).join(' · ') || '—'}</div>
-              <div><b>Home sections:</b> {read.sectionTypes.join(', ') || '— (not a Shopify theme, guessed from headings)'}</div>
+              {read.sections?.length ? (
+                <div style={{ marginTop: 4 }}><b>Home page, top to bottom ({read.sections.length} sections):</b>
+                  <table style={{ marginTop: 4 }}>
+                    <thead><tr><th>#</th><th>Where</th><th>Type</th><th>Holds</th><th>Headings / items</th></tr></thead>
+                    <tbody>{read.sections.map((x, i) => <tr key={i}><td>{i + 1}</td><td>{x.place}</td><td className="mono">{x.type}{x.marquee ? ' (running text)' : ''}</td><td>{[x.collections ? `${x.collections} categories` : '', x.products ? `${x.products} products` : '', x.images ? `${x.images} images` : '', x.videos ? `${x.videos} video` : '', x.buttons ? `${x.buttons} buttons` : ''].filter(Boolean).join(', ') || '—'}</td><td className="muted">{[...x.headings, ...x.items].slice(0, 6).join(' · ')}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              ) : <div><b>Home sections:</b> {read.sectionTypes.join(', ') || '— (not a Shopify theme, guessed from headings)'}</div>}
               <div><b>Fonts:</b> {read.fonts.join(', ') || '—'}</div>
               <div className="row" style={{ marginTop: 4 }}><b>Colours:</b> {read.colors.slice(0, 12).map((c) => <span key={c.value} title={`${c.value} ×${c.count}`} style={{ width: 18, height: 18, borderRadius: 4, background: c.value, border: '1px solid #ddd', display: 'inline-block' }} />)}</div>
               {read.collections.length > 0 && <div><b>Their collections:</b> {read.collections.map((c) => c.title).join(' · ')}</div>}
@@ -103,20 +111,22 @@ export default function ReferenceStep({ projectId, onChange }: { projectId: stri
 
           <label className="label">Home page sections, top to bottom</label>
           <table>
-            <thead><tr><th style={{ width: 60 }}>Order</th><th>Type</th><th>Title</th><th>What goes in it</th><th></th></tr></thead>
+            <thead><tr><th style={{ width: 60 }}>Order</th><th>Type</th><th>Title</th><th>What goes in it</th><th style={{ width: 70 }}>Count</th><th>Lines (for a running bar / badges / columns; separate with ;)</th><th></th></tr></thead>
             <tbody>
               {style.sections.map((s, i) => (
                 <tr key={i}>
                   <td className="row" style={{ gap: 2 }}><button className="btn btn-sm" onClick={() => move(i, -1)}>↑</button><button className="btn btn-sm" onClick={() => move(i, 1)}>↓</button></td>
-                  <td><select className="select" value={s.type} onChange={(e) => setSection(i, { type: e.target.value })}>{SECTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></td>
+                  <td><select className="select" value={s.type} title={SECTION_MEANING[s.type as keyof typeof SECTION_MEANING] || ''} onChange={(e) => setSection(i, { type: e.target.value })}>{SECTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select><div className="muted" style={{ fontSize: 11 }}>{SECTION_MEANING[s.type as keyof typeof SECTION_MEANING] || ''}</div></td>
                   <td><input className="input" value={s.title} onChange={(e) => setSection(i, { title: e.target.value })} /></td>
                   <td><input className="input" value={s.note} onChange={(e) => setSection(i, { note: e.target.value })} /></td>
+                  <td><input className="input" type="number" min={1} max={50} value={s.count ?? ''} onChange={(e) => setSection(i, { count: e.target.value ? Number(e.target.value) : undefined })} /></td>
+                  <td><input className="input" value={(s.items || []).join('; ')} onChange={(e) => setSection(i, { items: e.target.value.split(';').map((x) => x.trim()).filter(Boolean) })} /></td>
                   <td><button className="btn btn-sm btn-danger" onClick={() => set({ sections: style.sections.filter((_, j) => j !== i) })}><Trash2 size={12} /></button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <button className="btn btn-sm" style={{ marginTop: 6 }} disabled={style.sections.length >= 10} onClick={() => set({ sections: [...style.sections, { type: 'rich-text', title: '', note: '' }] })}>+ Add section</button>
+          <button className="btn btn-sm" style={{ marginTop: 6 }} disabled={style.sections.length >= 24} onClick={() => set({ sections: [...style.sections, { type: 'rich-text', title: '', note: '' }] })}>+ Add section</button>
 
           <label className="label">Collection ideas</label>
           {style.collections.map((c, i) => (

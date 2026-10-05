@@ -10,7 +10,7 @@ export async function buildStyleSheet(projectId: string, url: string): Promise<{
   const site = await readSite(url);
   const types = await query<{ product_type: string; title: string }>(`SELECT product_type, title FROM products WHERE project_id = $1 ORDER BY position LIMIT 60`, [projectId]);
   const merchant = { storeName: project.store_name || project.name, productTypes: Array.from(new Set(types.rows.map((r) => r.product_type).filter(Boolean))), sampleTitles: types.rows.map((r) => r.title) };
-  const a = await askText(STYLE_SYSTEM, stylePrompt(site, merchant), { temperature: 0.4, maxTokens: 1500, json: true });
+  const a = await askText(STYLE_SYSTEM, stylePrompt(site, merchant), { temperature: 0.4, maxTokens: 3500, json: true });
   query(`INSERT INTO ai_runs (project_id, kind, model, prompt_tokens, output_tokens, cost_usd, ms, ok) VALUES ($1, 'style', $2, $3, $4, $5, $6, true)`,
     [projectId, a.model, a.promptTokens, a.outputTokens, estimateCost(a.model, a.promptTokens, a.outputTokens), a.ms]).catch(() => {});
   const style = parseStyleSheet(a.text, merchant.storeName);

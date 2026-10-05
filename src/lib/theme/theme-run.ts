@@ -35,7 +35,8 @@ export async function assetsFor(projectId: string): Promise<PlanAssets> {
   const banners = await query<{ alt: string }>(`SELECT alt FROM images WHERE project_id = $1 AND kind IN ('banner', 'logo') AND path <> '' ORDER BY position`, [projectId]);
   const collections = await query<{ handle: string; title: string }>(`SELECT handle, title FROM collections WHERE project_id = $1 AND enabled ORDER BY title`, [projectId]);
   const products = await query<{ handle: string; title: string }>(`SELECT handle, title FROM products WHERE project_id = $1 ORDER BY position LIMIT 40`, [projectId]);
-  return { banners: banners.rows.map((b) => ({ slot: b.alt.split('|')[0].trim().toLowerCase(), alt: b.alt.split('|')[1]?.trim() || '' })).filter((b) => b.slot), collections: collections.rows, products: products.rows };
+  const cols = collections.rows.some((c) => c.handle === 'all') ? collections.rows : [...collections.rows, { handle: 'all', title: 'All products (every store has it)' }];
+  return { banners: banners.rows.map((b) => ({ slot: b.alt.split('|')[0].trim().toLowerCase(), alt: b.alt.split('|')[1]?.trim() || '' })).filter((b) => b.slot), collections: cols, products: products.rows };
 }
 
 export async function planTheme(projectId: string): Promise<ThemePlan> {
@@ -46,7 +47,7 @@ export async function planTheme(projectId: string): Promise<ThemePlan> {
   if (!theme) throw new Error('Upload the theme zip first');
   if (!Object.keys(theme.sections).length) throw new Error('No home page sections found in this theme');
   const assets = await assetsFor(projectId);
-  const a = await askText(PLAN_SYSTEM, planPrompt(theme, p.style_sheet, assets, p.store_name || p.name), { temperature: 0.3, maxTokens: 4000, json: true });
+  const a = await askText(PLAN_SYSTEM, planPrompt(theme, p.style_sheet, assets, p.store_name || p.name), { temperature: 0.3, maxTokens: 9000, json: true });
   query(`INSERT INTO ai_runs (project_id, kind, model, prompt_tokens, output_tokens, cost_usd, ms, ok) VALUES ($1, 'theme', $2, $3, $4, $5, $6, true)`,
     [projectId, a.model, a.promptTokens, a.outputTokens, estimateCost(a.model, a.promptTokens, a.outputTokens), a.ms]).catch(() => {});
   let raw: unknown;
