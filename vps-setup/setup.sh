@@ -36,7 +36,7 @@ echo "[4/6] Env file"
 if [ ! -f "$ENV_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$ENV_DIR/.env"
   chmod 600 "$ENV_DIR/.env"
-  echo "    -> $ENV_DIR/.env created from .env.example: fill it in (nano $ENV_DIR/.env), then run deploy.sh"
+  echo "    -> created; fill it with: bash /var/www/builder/vps-setup/configure.sh"
 fi
 
 echo "[5/6] nginx site $DOMAIN -> 127.0.0.1:3001 (+ /uploads/ from $UPLOADS)"
@@ -71,4 +71,4 @@ echo "[6/6] SSL (needs the DNS A record for $DOMAIN to point here already)"
 certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --email "admin@merchantbuild.in" --redirect || echo "    certbot failed (DNS not ready?). Run later: certbot --nginx -d $DOMAIN --redirect"
 
 echo ""
-echo "Done. Next: fill $ENV_DIR/.env, then: cd $APP_DIR && bash vps-setup/deploy.sh"
+echo "Done. Next: bash $APP_DIR/vps-setup/configure.sh   then   cd $APP_DIR && bash vps-setup/deploy.sh"

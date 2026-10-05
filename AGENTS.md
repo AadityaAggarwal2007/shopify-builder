@@ -34,7 +34,7 @@ link / AI image), pages, policies, menu, shipping, and a checklist for what the 
 | Screens | `src/app/projects/page.tsx` (list / create), `src/app/projects/[id]/page.tsx` (steps sidebar) + `_components/` (`ProductsStep`, `ProductDialog`, `CollectionsPanel`, `PublishPanel`) |
 | Database | `sql/*.sql`, additive only, applied by `vps-setup/deploy.sh` on every deploy (safe to run twice) |
 | Tests | `npm test` = `scripts/tests/{csv,mapper,client,auth}.js` (transpile the src file under test; a fake fetch for the client). Keep `npx tsc --noEmit` at 0 and `npm run build` green. |
-| VPS | `vps-setup/setup.sh` (once: folders, database, nginx, SSL), `vps-setup/deploy.sh` (every deploy) |
+| VPS | `vps-setup/setup.sh` (once: folders, database, nginx, SSL), `vps-setup/configure.sh` (fills `/etc/builder/.env` by asking; generates the secrets; never prints them), `vps-setup/deploy.sh` (every deploy) |
 
 ## Rules
 
