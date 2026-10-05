@@ -11,7 +11,11 @@ export async function GET(request: NextRequest) {
   const secret = process.env.SHOPIFY_CLIENT_SECRET || '';
   const clientId = process.env.SHOPIFY_CLIENT_ID || '';
   if (!secret || !clientId) return back('SHOPIFY_CLIENT_ID / SECRET are not set on the server');
-  if (!verifyCallbackHmac(sp, secret)) return back('Shopify callback failed its signature check');
+  if (!verifyCallbackHmac(sp, secret)) {
+    // pm2 logs builder: which params came and whether the secret has the expected shape (never the secret itself).
+    console.error('[shopify] callback hmac mismatch', { params: Array.from(sp.keys()).sort().join(','), secretShape: /^shpss_[0-9a-f]{32}$/.test(secret) ? 'ok' : `unexpected(${secret.length} chars)` });
+    return back('Shopify callback failed its signature check (is the Client secret on the server the current one? Rotate it in Shopify, paste the new one in configure.sh)');
+  }
   const shop = normalizeShop(sp.get('shop') || '');
   if (!shop) return back('Shopify sent an unknown store');
   if (!takeState(sp.get('state') || '', shop)) return back('This connect link is old or was not started here. Press Connect again.');

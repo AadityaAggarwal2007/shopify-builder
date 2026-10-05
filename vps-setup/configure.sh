@@ -74,6 +74,9 @@ echo "3) Shopify app (Dev Dashboard > your app > Settings: Client ID and Client 
 echo "   Press Enter to skip for now; a pasted store token still works without them."
 ask SHOPIFY_CLIENT_ID "   SHOPIFY_CLIENT_ID"
 ask SHOPIFY_CLIENT_SECRET "   SHOPIFY_CLIENT_SECRET" secret
+cid=$(get SHOPIFY_CLIENT_ID); sec=$(get SHOPIFY_CLIENT_SECRET)
+[ -z "$cid" ] || [[ "$cid" =~ ^[0-9a-f]{32}$ ]] || echo "   ! Client ID does not look right (expected 32 hex characters, got ${#cid}). Copy it again from Shopify > App settings."
+[ -z "$sec" ] || [[ "$sec" =~ ^shpss_[0-9a-f]{32}$ ]] || echo "   ! Client secret does not look right (expected shpss_ + 32 hex characters, got ${#sec} characters). Copy it again from Shopify > App settings (copy icon next to Client secret)."
 
 echo ""
 echo "Saved. What is set (values hidden):"
