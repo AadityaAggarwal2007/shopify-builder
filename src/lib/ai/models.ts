@@ -37,10 +37,10 @@ export function estimateCost(model: string, promptTokens: number, outputTokens: 
   return (promptTokens * p.in + outputTokens * p.out) / 1_000_000;
 }
 
-export interface TextAnswer { text: string; model: string; promptTokens: number; outputTokens: number; ms: number }
+export interface TextAnswer { text: string; model: string; promptTokens: number; outputTokens: number; ms: number; finish: string }
 
 // One text completion over the chain. temperature 0.5 by default; 40 s per model.
-export async function askText(system: string, user: string, opts: { temperature?: number; maxTokens?: number; json?: boolean } = {}): Promise<TextAnswer> {
+export async function askText(system: string, user: string, opts: { temperature?: number; maxTokens?: number; json?: boolean; timeoutMs?: number } = {}): Promise<TextAnswer> {
   if (!aiReady()) throw new Error('AI_API_KEY is not set');
   const client = getClient();
   let lastErr: unknown = null;
@@ -53,10 +53,12 @@ export async function askText(system: string, user: string, opts: { temperature?
       };
       if (model.startsWith('deepseek/deepseek-v4')) body.reasoning = { enabled: false };
       if (opts.json) body.response_format = { type: 'json_object' };
-      const res = await client.chat.completions.create(body as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming, { timeout: 40_000, maxRetries: 0 });
+      const res = await client.chat.completions.create(body as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming, { timeout: opts.timeoutMs ?? 40_000, maxRetries: 0 });
       const text = (res.choices?.[0]?.message?.content || '').trim();
+      const finish = String(res.choices?.[0]?.finish_reason || '');
       if (!text) { lastErr = Object.assign(new Error(`${model}: blank answer`), { status: 502 }); continue; }
-      return { text, model, promptTokens: res.usage?.prompt_tokens || 0, outputTokens: res.usage?.completion_tokens || 0, ms: Date.now() - t0 };
+      if (finish === 'length') console.warn(`[ai] ${model}: answer cut off at ${opts.maxTokens ?? 1200} tokens`);
+      return { text, model, promptTokens: res.usage?.prompt_tokens || 0, outputTokens: res.usage?.completion_tokens || 0, ms: Date.now() - t0, finish };
     } catch (err) {
       lastErr = err;
       if (!isRetryable(err)) break;

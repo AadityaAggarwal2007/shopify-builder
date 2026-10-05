@@ -116,7 +116,10 @@ t('templates: existing product sections get settings + appended blocks within li
   assert.deepStrictEqual(out.sections.builder_1_collapsible_content.block_order, ['collapsible_row_1']);
   assert.strictEqual(out.sections.rec.type, 'product-recommendations', 'other sections kept');
   const pr = plan.planPrompt(theme, { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [], collections: [], offers: [], policies: { shipping: '', refund: '' } }, assets, 'S');
-  assert.ok(pr.includes('TEMPLATE product') && pr.includes('key main (type main-product)') && pr.includes('has blocks: title, text') && pr.includes('you may ADD on the product page') && pr.includes('product-only'));
+  assert.ok(!pr.includes('TEMPLATE product'), 'the home prompt no longer carries the templates');
+  const tp = plan.planTemplatesPrompt(theme, { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [], collections: [], offers: [], policies: { shipping: '', refund: '' }, productPage: { features: ['rating'], offerLine: 'Buy 2 get 1', sections: [] } }, assets, 'S');
+  assert.ok(tp.includes('TEMPLATE product') && tp.includes('key main (type main-product)') && tp.includes('has blocks: title, text') && tp.includes('you may ADD on the product page') && tp.includes('product-only') && tp.includes('Buy 2 get 1') && !tp.includes('SECTION TYPES you may use on the home page'));
+  assert.ok(/"templates"/.test(plan.PLAN_TEMPLATES_SYSTEM) && !/"templates"/.test(plan.PLAN_SYSTEM));
 });
 
 t('applyPlan: settings_data keeps the rest, index.json has the new sections in order, banner tokens resolved', () => {

@@ -11,7 +11,7 @@ import { fileCreateFromUrl, themeCreateFromUrl, themePublish, themeStatus } from
 import { ShopifyError, gidNumber } from '@/lib/shopify/client';
 import { readThemeZip, writeThemeZip } from './theme-zip';
 import { summarize, type ThemeSummary } from './theme-schema';
-import { applyGroup, applyPlan, applyTemplate, FONT_HANDLES, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
+import { applyGroup, applyPlan, applyTemplate, FONT_HANDLES, planPrompt, planTemplatesPrompt, PLAN_SYSTEM, PLAN_TEMPLATES_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
 import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 const zipPath = (projectId: string, built: boolean) => path.join(uploadsDir(), 'themes', `${projectId}${built ? '-built' : ''}.zip`);
@@ -47,12 +47,28 @@ export async function planTheme(projectId: string): Promise<ThemePlan> {
   if (!theme) throw new Error('Upload the theme zip first');
   if (!Object.keys(theme.sections).length) throw new Error('No home page sections found in this theme');
   const assets = await assetsFor(projectId);
-  const a = await askText(PLAN_SYSTEM, planPrompt(theme, p.style_sheet, assets, p.store_name || p.name), { temperature: 0.3, maxTokens: 9000, json: true });
-  query(`INSERT INTO ai_runs (project_id, kind, model, prompt_tokens, output_tokens, cost_usd, ms, ok) VALUES ($1, 'theme', $2, $3, $4, $5, $6, true)`,
+  const storeName = p.store_name || p.name;
+  const record = (a: { model: string; promptTokens: number; outputTokens: number; ms: number }) => query(`INSERT INTO ai_runs (project_id, kind, model, prompt_tokens, output_tokens, cost_usd, ms, ok) VALUES ($1, 'theme', $2, $3, $4, $5, $6, true)`,
     [projectId, a.model, a.promptTokens, a.outputTokens, estimateCost(a.model, a.promptTokens, a.outputTokens), a.ms]).catch(() => {});
-  let raw: unknown;
-  try { const t = a.text.replace(/```json|```/g, '').trim(); raw = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch { throw new Error('The AI did not answer with valid JSON; try again'); }
+  const parse = (text: string, what: string): Record<string, unknown> => {
+    try { const t = text.replace(/```json|```/g, '').trim(); return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); }
+    catch { console.error(`[theme plan] ${what}: not JSON (${text.length} chars): ${text.slice(0, 200)}`); throw new Error(`The AI did not answer with valid JSON for the ${what}; try again`); }
+  };
+  // Two calls (home page + globals + header / footer; then the product / collection templates): one answer was cut off.
+  const hasTemplates = Object.keys(theme.templates).length > 0;
+  const [home, tpl] = await Promise.all([
+    askText(PLAN_SYSTEM, planPrompt(theme, p.style_sheet, assets, storeName), { temperature: 0.3, maxTokens: 7000, json: true, timeoutMs: 120_000 }),
+    hasTemplates ? askText(PLAN_TEMPLATES_SYSTEM, planTemplatesPrompt(theme, p.style_sheet, assets, storeName), { temperature: 0.3, maxTokens: 5000, json: true, timeoutMs: 120_000 }).catch((err: Error) => { console.error(`[theme plan] templates: ${err.message}`); return null; }) : Promise.resolve(null),
+  ]);
+  record(home); if (tpl) record(tpl);
+  const raw = parse(home.text, 'home page');
+  let tplNote = '';
+  if (hasTemplates) {
+    if (!tpl) tplNote = 'product / collection pages: the AI did not answer; press Plan again';
+    else { try { const t = parse(tpl.text, 'product / collection pages'); raw.templates = t.templates; raw.notes = [...(Array.isArray(raw.notes) ? raw.notes : []), ...(Array.isArray(t.notes) ? t.notes : [])]; } catch (err) { tplNote = (err as Error).message; } }
+  }
   const plan = validatePlan(raw, theme, assets);
+  if (tplNote) plan.notes.push(tplNote);
   await query(`UPDATE projects SET theme_plan = $2, theme_built_at = NULL, updated_at = now() WHERE id = $1`, [projectId, JSON.stringify(plan)]);
   return plan;
 }

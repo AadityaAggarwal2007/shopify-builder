@@ -15,7 +15,7 @@ export async function draftPages(projectId: string): Promise<{ handle: string; t
   const p = await queryOne<{ store_facts: StoreFacts | null; style_sheet: StyleSheet | null }>(`SELECT store_facts, style_sheet FROM projects WHERE id = $1`, [projectId]);
   if (!p?.store_facts?.store_name) throw new Error('Fill in the store facts first (at least the store name)');
   const types = await query<{ product_type: string }>(`SELECT DISTINCT product_type FROM products WHERE project_id = $1 AND product_type <> '' LIMIT 15`, [projectId]);
-  const a = await askText(PAGES_SYSTEM, pagesPrompt(p.store_facts, p.style_sheet, types.rows.map((r) => r.product_type)), { temperature: 0.5, maxTokens: 6000, json: true });
+  const a = await askText(PAGES_SYSTEM, pagesPrompt(p.store_facts, p.style_sheet, types.rows.map((r) => r.product_type)), { temperature: 0.5, maxTokens: 6000, json: true, timeoutMs: 120_000 });
   query(`INSERT INTO ai_runs (project_id, kind, model, prompt_tokens, output_tokens, cost_usd, ms, ok) VALUES ($1, 'page', $2, $3, $4, $5, $6, true)`,
     [projectId, a.model, a.promptTokens, a.outputTokens, estimateCost(a.model, a.promptTokens, a.outputTokens), a.ms]).catch(() => {});
   const pages = parsePages(a.text);
