@@ -14,12 +14,13 @@ touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
 
 # Values are written in single quotes: Next.js reads the env file like dotenv, where an unquoted
 # `$x` expands and `#` starts a comment, which silently broke a password. Single quotes keep the
-# value exactly as typed (a value may not contain a single quote itself).
+# value exactly as typed (a single quote inside a value is dropped).
 unquote() { local v="$1"; v="${v#\'}"; v="${v%\'}"; v="${v#\"}"; v="${v%\"}"; printf '%s' "$v"; }
 get() { unquote "$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"; }
 set_kv() {
   local k="$1" v="$2"
-  case "$v" in *"'"*) echo "   A single quote (') is not allowed in $k; try again."; return 1;; esac
+  # Stray characters a terminal can add (a carriage return, a pasted quote, spaces round the ends) are dropped.
+  v="${v//$'\r'/}"; v="${v//\'/}"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
   grep -vE "^$k=" "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
   printf "%s='%s'\n" "$k" "$v" >> "$ENV_FILE.tmp"
   mv "$ENV_FILE.tmp" "$ENV_FILE"; chmod 600 "$ENV_FILE"
@@ -28,7 +29,7 @@ ask() {  # ask KEY "question" [secret]
   local k="$1" q="$2" secret="$3" cur; cur=$(get "$k")
   local hint=""; [ -n "$cur" ] && hint=" [Enter = keep current]"
   if [ "$secret" = "secret" ]; then read -r -s -p "$q$hint: " v; echo; else read -r -p "$q$hint: " v; fi
-  if [ -n "$v" ]; then set_kv "$k" "$v" || ask "$k" "$q" "$secret"; elif [ -z "$cur" ]; then echo "   (left empty)"; fi
+  if [ -n "$v" ]; then set_kv "$k" "$v"; elif [ -z "$cur" ]; then echo "   (left empty)"; fi
 }
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
