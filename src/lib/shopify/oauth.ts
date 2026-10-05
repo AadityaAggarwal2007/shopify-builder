@@ -77,3 +77,19 @@ export async function exchangeCode(shop: string, code: string, clientId: string,
   if (!json.access_token) throw new Error('Token exchange returned no access token');
   return { accessToken: String(json.access_token), scope: String(json.scope || '') };
 }
+
+// Client credentials grant (Dev Dashboard app installed on a store of the SAME organization): no
+// browser round trip, no callback signature; the token lasts about 24 hours and storeAuth() renews
+// it. The owner's own stores only.
+export async function clientCredentialsToken(shop: string, clientId: string, clientSecret: string): Promise<{ accessToken: string; scope: string; expiresInSec: number }> {
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Shopify refused the direct connect (${res.status}): ${text.slice(0, 200)}`);
+  const json = JSON.parse(text);
+  if (!json.access_token) throw new Error('Shopify returned no access token');
+  return { accessToken: String(json.access_token), scope: String(json.scope || ''), expiresInSec: Number(json.expires_in || 0) };
+}

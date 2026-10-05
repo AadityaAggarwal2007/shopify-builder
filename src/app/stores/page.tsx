@@ -28,6 +28,16 @@ export default function StoresPage() {
     if (!shop.trim()) return;
     window.location.href = `/api/shopify/connect?shop=${encodeURIComponent(shop.trim())}&token=${encodeURIComponent(token())}`;
   }
+  // The app's own client credentials: for a store of the same Shopify organization, no browser round trip.
+  async function connectDirect() {
+    if (!shop.trim()) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api<{ shop: { name: string }; scope: string }>('/api/stores/direct', { method: 'POST', json: { shop: shop.trim() } });
+      setMsg({ kind: 'ok', text: `Connected directly: ${r.shop.name}` }); setShop(''); load();
+    } catch (e) { setMsg({ kind: 'bad', text: (e as Error).message }); }
+    setBusy(false);
+  }
   async function paste() {
     setBusy(true); setMsg(null);
     try {
@@ -56,6 +66,7 @@ export default function StoresPage() {
         <div className="row">
           <input className="input" style={{ maxWidth: 360 }} placeholder="mystore.myshopify.com" value={shop} onChange={(e) => setShop(e.target.value)} />
           <button className="btn btn-primary" onClick={connect}><Plug size={14} /> Connect with Shopify</button>
+          <button className="btn" disabled={busy} onClick={connectDirect} title="Your own store (same Shopify organization as the app): no Shopify page, the app's credentials get the token">Connect directly</button>
         </div>
         <details style={{ marginTop: 14 }}>
           <summary className="muted small" style={{ cursor: 'pointer' }}>Old store with a legacy custom app? Paste its Admin API token instead</summary>
@@ -77,7 +88,7 @@ export default function StoresPage() {
                 <tr key={s.id}>
                   <td><b>{s.name}</b></td>
                   <td className="mono small">{s.shop_domain}</td>
-                  <td>{s.connected_via === 'oauth' ? 'Shopify app' : 'Pasted token'}</td>
+                  <td>{s.connected_via === 'oauth' ? 'Shopify app' : s.connected_via === 'client_credentials' ? 'Direct (auto-renews)' : 'Pasted token'}</td>
                   <td className="small">{fmtWhen(s.last_ok_at) || '—'}</td>
                   <td className="row" style={{ justifyContent: 'flex-end' }}>
                     <button className="btn btn-sm" onClick={() => test(s)}><RefreshCw size={12} /> Test</button>
