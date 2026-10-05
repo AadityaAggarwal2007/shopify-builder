@@ -5,13 +5,14 @@ import { Trash2 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { api } from '@/lib/client';
 import ProductsStep from './_components/ProductsStep';
+import ReferenceStep from './_components/ReferenceStep';
 
 export interface ProjectInfo { id: string; name: string; store_name: string; shop_domain: string; reference_url: string | null }
 export interface Counts { products: number; pushed: number; errors: number; images: number; pending_images: number; described: number }
 
 const STEPS: { key: string; label: string; soon?: boolean }[] = [
   { key: 'products', label: 'Products' },
-  { key: 'reference', label: 'Reference site', soon: true },
+  { key: 'reference', label: 'Reference site' },
   { key: 'banners', label: 'Banners', soon: true },
   { key: 'theme', label: 'Theme', soon: true },
   { key: 'pages', label: 'Pages & policies', soon: true },
@@ -59,6 +60,7 @@ export default function ProjectPage() {
             </aside>
             <section>
               {step === 'products' && <ProductsStep projectId={id} counts={counts} onChange={load} />}
+              {step === 'reference' && <ReferenceStep projectId={id} onChange={load} />}
             </section>
           </div>
         </>
