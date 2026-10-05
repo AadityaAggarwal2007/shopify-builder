@@ -35,20 +35,15 @@ export function authorizeUrl(shop: string, clientId: string, redirectUri: string
 }
 
 // Shopify signs the callback's query string with the client secret: hex HMAC-SHA256 over the
-// DECODED parameters (hmac removed), sorted by key, joined as key=value with &, where only & and %
-// are escaped in keys and values (and = in keys). URLSearchParams.toString() would percent-encode
-// the base64 `=` of the `host` value and break the check. Constant-time compare.
+// parameters (hmac and signature removed), sorted by key, serialised exactly as
+// URLSearchParams.toString() does (form-encoding: the base64 '=' of `host` becomes %3D) with '+'
+// written as %20. This is what Shopify's own @shopify/shopify-api does (ProcessedQuery.stringify);
+// the prose in the docs ("only & and % are escaped") does not match real callbacks. Constant-time compare.
 export function callbackMessage(searchParams: URLSearchParams): string {
-  const esc = (s: string, key: boolean) => {
-    let out = s.replace(/%/g, '%25').replace(/&/g, '%26');
-    if (key) out = out.replace(/=/g, '%3D');
-    return out;
-  };
-  return Array.from(searchParams.entries())
-    .filter(([k]) => k !== 'hmac' && k !== 'signature')
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${esc(k, true)}=${esc(v, false)}`)
-    .join('&');
+  const params = new URLSearchParams();
+  for (const [k, v] of searchParams.entries()) if (k !== 'hmac' && k !== 'signature') params.append(k, v);
+  params.sort();
+  return params.toString().replace(/\+/g, '%20');
 }
 export function verifyCallbackHmac(searchParams: URLSearchParams, clientSecret: string): boolean {
   const hmac = searchParams.get('hmac') || '';
