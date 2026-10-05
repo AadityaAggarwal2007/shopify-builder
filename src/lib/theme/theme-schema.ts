@@ -6,13 +6,20 @@ export interface SectionDef {
   type: string; name: string; settings: SettingDef[];
   blocks: { type: string; name: string; settings: SettingDef[]; limit?: number }[];
   maxBlocks?: number; presets: boolean; enabledOnIndex: boolean;
+  templates: string[] | null;          // enabled_on.templates (null = anywhere), disabled_on folded in by allowedOn
+  disabledTemplates: string[];
+  groupsOnly: boolean;                 // enabled_on.groups without 'template' = header / footer only
 }
+export interface TemplateSection { key: string; type: string; settings: Record<string, unknown>; blocks: { key: string; type: string }[]; disabled?: boolean }
+export interface TemplateDef { sections: TemplateSection[]; order: string[] }
 export interface ThemeSummary {
   name: string; version: string;
   settings: SettingDef[];                // global settings with an id
   sections: Record<string, SectionDef>;  // home page section types (with presets, allowed on index)
   allSections: Record<string, SectionDef>; // every section with a schema (the header / footer groups use them)
   groups: Record<string, GroupSection[]>;  // header-group / footer-group: the sections they hold, in order
+  templates: Record<string, TemplateDef>;  // product / collection JSON templates: the sections they hold
+  templateSections: Record<string, string[]>; // product / collection: the section types that may be ADDED there
   currentSettings: Record<string, unknown>;  // settings_data.json current
   indexOrder: string[];                  // templates/index.json order (section keys)
   index: IndexTemplate | null;
@@ -53,12 +60,33 @@ export function parseSectionSchema(type: string, text: string): SectionDef | nul
   const blocks = Array.isArray(j.blocks) ? (j.blocks as Record<string, unknown>[]).filter((b) => typeof b?.type === 'string' && b.type !== '@app').map((b) => ({ type: String(b.type), name: label(b.name) || String(b.type), settings: defs(b.settings, String(b.type)), limit: typeof b.limit === 'number' ? b.limit : undefined })) : [];
   const enabledOn = (j.enabled_on as { templates?: string[]; groups?: string[] } | undefined);
   const disabledOn = (j.disabled_on as { templates?: string[]; groups?: string[] } | undefined);
-  let enabledOnIndex = true;
-  if (enabledOn?.templates && !enabledOn.templates.includes('*') && !enabledOn.templates.includes('index')) enabledOnIndex = false;
-  if (disabledOn?.templates && (disabledOn.templates.includes('*') || disabledOn.templates.includes('index'))) enabledOnIndex = false;
-  if (enabledOn?.groups && !enabledOn.groups.includes('*') && !enabledOn.groups.includes('template')) enabledOnIndex = false;
-  if (disabledOn?.groups && (disabledOn.groups.includes('*') || disabledOn.groups.includes('template'))) enabledOnIndex = false;
-  return { type, name: label(j.name) || type, settings: defs(j.settings, type), blocks, maxBlocks: typeof j.max_blocks === 'number' ? j.max_blocks : undefined, presets: Array.isArray(j.presets) && j.presets.length > 0, enabledOnIndex };
+  const groupsOnly = Boolean((enabledOn?.groups && !enabledOn.groups.includes('*') && !enabledOn.groups.includes('template')) || (disabledOn?.groups && (disabledOn.groups.includes('*') || disabledOn.groups.includes('template'))));
+  const def: SectionDef = { type, name: label(j.name) || type, settings: defs(j.settings, type), blocks, maxBlocks: typeof j.max_blocks === 'number' ? j.max_blocks : undefined, presets: Array.isArray(j.presets) && j.presets.length > 0, enabledOnIndex: true, templates: Array.isArray(enabledOn?.templates) ? enabledOn!.templates!.map(String) : null, disabledTemplates: Array.isArray(disabledOn?.templates) ? disabledOn!.templates!.map(String) : [], groupsOnly };
+  def.enabledOnIndex = allowedOn(def, 'index');
+  return def;
+}
+
+// May a section be ADDED to this template (index, product, collection)? Needs presets (else it is a main section).
+export function allowedOn(d: SectionDef, template: string): boolean {
+  if (!d.presets || d.groupsOnly) return false;
+  if (d.templates && !d.templates.includes('*') && !d.templates.includes(template)) return false;
+  if (d.disabledTemplates.includes('*') || d.disabledTemplates.includes(template)) return false;
+  return true;
+}
+
+export function parseTemplate(text: string): TemplateDef | null {
+  try {
+    const j = JSON.parse(text.replace(/^\s*\/\*[\s\S]*?\*\/\s*/, ''));
+    if (!j?.sections || !Array.isArray(j.order)) return null;
+    const sections: TemplateSection[] = (j.order as string[]).map((key) => {
+      const s = j.sections[key] || {};
+      const blockOrder: string[] = Array.isArray(s.block_order) ? s.block_order : Object.keys(s.blocks || {});
+      return { key, type: String(s.type || ''), settings: (s.settings || {}) as Record<string, unknown>, blocks: blockOrder.map((bk) => ({ key: bk, type: String(s.blocks?.[bk]?.type || '') })).filter((b) => b.type), ...(s.disabled ? { disabled: true } : {}) };
+    }).filter((x) => x.type);
+    return { sections, order: j.order as string[] };
+  } catch {
+    return null;
+  }
 }
 
 export function parseIndexTemplate(text: string | null): IndexTemplate | null {
@@ -94,7 +122,7 @@ export function parseGroup(text: string): GroupSection[] {
   }
 }
 
-export function summarize(files: { settingsSchema: string | null; settingsData: string | null; indexTemplate: string | null; sections: Record<string, string>; groups?: Record<string, string> }): ThemeSummary {
+export function summarize(files: { settingsSchema: string | null; settingsData: string | null; indexTemplate: string | null; sections: Record<string, string>; groups?: Record<string, string>; templates?: Record<string, string> }): ThemeSummary {
   if (!files.settingsSchema) throw new Error('config/settings_schema.json missing');
   const schema = parseSettingsSchema(files.settingsSchema);
   const sections: Record<string, SectionDef> = {};
@@ -102,6 +130,14 @@ export function summarize(files: { settingsSchema: string | null; settingsData: 
   for (const [type, text] of Object.entries(files.sections)) { const d = parseSectionSchema(type, text); if (!d) continue; allSections[type] = d; if (d.presets && d.enabledOnIndex) sections[type] = d; }
   const groups: ThemeSummary['groups'] = {};
   for (const [name, text] of Object.entries(files.groups || {})) if (/-group$/.test(name)) groups[name] = parseGroup(text);
+  const templates: ThemeSummary['templates'] = {};
+  const templateSections: ThemeSummary['templateSections'] = {};
+  for (const [name, text] of Object.entries(files.templates || {})) {
+    const t = parseTemplate(text);
+    if (!t) continue;
+    templates[name] = t;
+    templateSections[name] = Object.values(allSections).filter((d) => allowedOn(d, name)).map((d) => d.type);
+  }
   const index = parseIndexTemplate(files.indexTemplate);
-  return { name: schema.name, version: schema.version, settings: schema.settings, sections, allSections, groups, currentSettings: parseSettingsData(files.settingsData), indexOrder: index ? index.order : [], index };
+  return { name: schema.name, version: schema.version, settings: schema.settings, sections, allSections, groups, templates, templateSections, currentSettings: parseSettingsData(files.settingsData), indexOrder: index ? index.order : [], index };
 }

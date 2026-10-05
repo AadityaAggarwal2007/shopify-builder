@@ -11,6 +11,7 @@ export interface ThemeFiles {
   indexTemplate: string | null;    // templates/index.json (Online Store 2.0) or null (legacy liquid)
   sections: Record<string, string>; // sections/<name>.liquid -> the {% schema %} JSON text
   groups: Record<string, string>;   // sections/<name>.json (header-group / footer-group) -> JSON text
+  templates: Record<string, string>; // templates/product.json, templates/collection.json when they exist (JSON templates)
   prefix: string;                  // folder prefix inside the zip ('' or 'my-theme/')
   fileCount: number;
 }
@@ -44,9 +45,11 @@ export async function readThemeZip(buf: Buffer): Promise<{ zip: JSZip; files: Th
     const schema = liquid.match(/{%-?\s*schema\s*-?%}([\s\S]*?){%-?\s*endschema\s*-?%}/);
     if (schema) sections[m[1]] = schema[1].trim();
   }
+  const templates: Record<string, string> = {};
+  for (const t of ['product', 'collection']) { const v = await text(`templates/${t}.json`); if (v) templates[t] = v; }
   return {
     zip,
-    files: { settingsSchema: await text('config/settings_schema.json'), settingsData: await text('config/settings_data.json'), indexTemplate: await text('templates/index.json'), sections, groups, prefix, fileCount: Object.keys(zip.files).length },
+    files: { settingsSchema: await text('config/settings_schema.json'), settingsData: await text('config/settings_data.json'), indexTemplate: await text('templates/index.json'), sections, groups, templates, prefix, fileCount: Object.keys(zip.files).length },
   };
 }
 

@@ -63,6 +63,19 @@ t('parseSections: every Shopify section in order with its place, counts, heading
   assert.strictEqual(p.sections.length, 8, 'parseHtml carries the sections');
 });
 
+t('productFeatures: what a product page shows, from its text and markup', () => {
+  const html = `<html><body><h1>16 pcs oxidised jhumkas</h1><div class="price"><span class="price__sale">Rs. 499</span> <s>Rs. 2,499</s> <span class="badge">Save 80%</span></div>
+  <p>Tax included.</p><div class="jdgm-prev-badge">4.5 stars (120 reviews)</div><div class="offer">BUY 1 GET 1 FREE</div>
+  <fieldset class="product-form__input"><legend>Colour</legend></fieldset><p class="urgency">Selling fast! Only 3 left</p><p>Your order will be delivered by 12 Oct</p>
+  <button class="sticky-atc">Add to cart</button><h2>Frequently asked questions</h2><video src="v.mp4"></video>
+  <ul><li>Free shipping</li><li>7 days return</li><li>Secure payment</li></ul><a href="https://wa.me/91999">Chat</a><h2>You may also like</h2></body></html>`;
+  const f = rs.productFeatures(html);
+  for (const k of ['compare_price', 'save_percent', 'tax_included', 'rating', 'reviews', 'offer_badge', 'variants', 'urgency', 'delivery_estimate', 'faq', 'video', 'trust_badges', 'whatsapp', 'sticky_cart', 'recommendations']) assert.ok(f.includes(k), `missing ${k}`);
+  assert.ok(!f.includes('size_chart') && !f.includes('bundle') && !f.includes('wishlist'));
+  assert.deepStrictEqual(rs.productFeatures('<html><body><h1>Plain</h1><p>Rs. 100</p></body></html>'), []);
+  assert.ok(Object.keys(rs.PRODUCT_FEATURES).length >= 15);
+});
+
 t('extractColorsAndFonts: hex short/long, rgb, frequency order; generic fonts dropped', () => {
   const r = rs.extractColorsAndFonts(`.a{color:#F00;background:#ff0000;border-color:rgb(255,0,0)} .b{color:#123456;font-family:"Playfair Display", serif} .c{font-family:Inter,sans-serif} .d{font-family:var(--font)}`);
   assert.deepStrictEqual(r.colors[0], { value: '#ff0000', count: 3 });
@@ -81,6 +94,10 @@ t('parseStyleSheet: keeps known sections, hex colours, caps; refuses junk', () =
   assert.deepStrictEqual(rich.sections[0], { type: 'marquee', title: 'Bar', note: 'runs', count: 4, items: ['Fast delivery', 'Easy returns'] });
   assert.deepStrictEqual(rich.sections[1], { type: 'collection-list', title: 'Shop', note: 'tiles' }, 'a count over 50 is dropped');
   assert.ok(ss.SECTION_TYPES.includes('trust-badges') && ss.SECTION_TYPES.includes('product-grid') && ss.SECTION_TYPES.includes('announcement-bar'));
+  assert.deepStrictEqual(ok.productPage, { features: [], offerLine: '', sections: [] }, 'missing product page = empty');
+  const pages = ss.parseStyleSheet(JSON.stringify({ sections: [{ type: 'hero-banner', title: 'x', note: 'y' }], productPage: { features: ['compare_price', 'nope', 'rating', 'rating'], offerLine: 'Buy 2 get 1', sections: [{ type: 'faq', title: 'Q', note: 'n', count: 4 }, { type: 'weird' }] }, collectionPage: { note: '4 per row, filters left', sections: [{ type: 'image-banner', title: 'B', note: 'top' }] } }), 'F');
+  assert.deepStrictEqual(pages.productPage, { features: ['compare_price', 'rating'], offerLine: 'Buy 2 get 1', sections: [{ type: 'faq', title: 'Q', note: 'n', count: 4 }] });
+  assert.deepStrictEqual(pages.collectionPage, { note: '4 per row, filters left', sections: [{ type: 'image-banner', title: 'B', note: 'top' }] });
   assert.deepStrictEqual(ok.collections, [{ title: 'Jhumkas', note: 'oxidised' }]);
   assert.throws(() => ss.parseStyleSheet('no json here', 'F'), /style sheet/);
   assert.throws(() => ss.parseStyleSheet('{"sections":[]}', 'F'), /no usable/);
@@ -90,7 +107,10 @@ t('parseStyleSheet: keeps known sections, hex colours, caps; refuses junk', () =
 
 t('stylePrompt never asks to copy and carries the merchant facts', () => {
   const site = { url: 'u', finalUrl: 'https://ref.example/', title: 'Ref', description: '', isShopify: true, nav: [{ text: 'Shop', href: '' }], headings: [], sectionTypes: ['image-banner'], sections: [{ place: 'header', type: 'marquee', headings: [], text: 'Premium quality', items: ['Premium quality', 'Comfy'], collections: 0, products: 0, images: 0, videos: 0, buttons: 0, marquee: true }, { place: 'main', type: 'collection-list', headings: ['Shop by categories'], text: '', items: [], collections: 6, products: 0, images: 6, videos: 0, buttons: 0, marquee: false }], colors: [{ value: '#112233', count: 9 }], fonts: ['Lato'], imageCount: 3, policies: [], collections: [{ title: 'Rings', handle: 'rings' }], products: [], textSample: 'hello', errors: [] };
+  site.pages = { product: 'https://ref.example/products/x', collection: 'https://ref.example/collections/y' }; site.productPage = [{ place: 'main', type: 'main-product', headings: ['X'], text: '', items: [], collections: 0, products: 0, images: 4, videos: 0, buttons: 2, marquee: false }]; site.collectionPage = []; site.productFeatures = ['compare_price', 'rating']; site.productOptions = ['Colour']; site.variantCount = 3;
   const p = ss.stylePrompt(site, { storeName: 'My Store', productTypes: ['Bangles'], sampleTitles: ['Pink bangle set'] });
+  assert.ok(p.includes('REFERENCE PRODUCT PAGE') && p.includes('compare_price, rating') && p.includes('options: Colour') && p.includes('main-product (4 images, 2 buttons)') && p.includes('REFERENCE COLLECTION PAGE'));
+  assert.ok(/productPage\.features/.test(ss.STYLE_SYSTEM) && /collectionPage\.note/.test(ss.STYLE_SYSTEM));
   assert.ok(p.includes("Merchant's store name: My Store") && p.includes('Bangles') && p.includes('#112233') && p.includes('Lato'));
   assert.ok(p.includes('#1 [header] marquee (RUNNING TEXT BAR)') && p.includes('#2 [main] collection-list (6 category links, 6 images)') && p.includes('"Shop by categories"'), 'one line per reference section with its counts');
   assert.ok(/ONE entry per section/.test(ss.STYLE_SYSTEM) && /trust-badges/.test(ss.STYLE_SYSTEM));

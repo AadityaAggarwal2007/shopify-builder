@@ -23,17 +23,25 @@ const sections = {
   'announcement-bar': JSON.stringify({ name: 'Announcement', settings: [{ type: 'text', id: 'text', label: 'Text' }], enabled_on: { groups: ['header'] } }),
   'main-product': JSON.stringify({ name: 'Product', settings: [], enabled_on: { templates: ['product'] }, presets: [{ name: 'x' }] }),
   'no-preset': JSON.stringify({ name: 'Internal', settings: [] }),
+  'main-product': JSON.stringify({ name: 'Product information', settings: [{ type: 'checkbox', id: 'enable_sticky_info', default: false }, { type: 'checkbox', id: 'show_compare', default: true }], blocks: [{ type: 'title', limit: 1, settings: [] }, { type: 'text', settings: [{ type: 'text', id: 'text' }] }, { type: 'collapsible_tab', settings: [{ type: 'text', id: 'heading' }, { type: 'richtext', id: 'content' }] }], max_blocks: 6 }),
+  'collapsible-content': JSON.stringify({ name: 'Collapsible content', settings: [{ type: 'text', id: 'heading' }], blocks: [{ type: 'collapsible_row', settings: [{ type: 'text', id: 'heading' }, { type: 'richtext', id: 'row_content' }] }], presets: [{ name: 'x' }] }),
+  'product-only': JSON.stringify({ name: 'Product only', settings: [], enabled_on: { templates: ['product'] }, presets: [{ name: 'x' }] }),
 };
+const productTemplate = '/* c */\n' + JSON.stringify({ sections: { main: { type: 'main-product', settings: { show_compare: true }, blocks: { title: { type: 'title', settings: {} }, t1: { type: 'text', settings: { text: 'old' } } }, block_order: ['title', 't1'] }, rec: { type: 'product-recommendations', settings: {} } }, order: ['main', 'rec'] });
 const indexTemplate = '/* comment */\n' + JSON.stringify({ sections: { old: { type: 'rich-text', settings: {} } }, order: ['old'] });
 const settingsData = JSON.stringify({ current: { colors_accent_1: '#121212', other_setting: 5 }, presets: { Default: {} } });
 const headerGroup = '/* c */\n' + JSON.stringify({ type: 'header', name: 'Header group', sections: { announcement: { type: 'announcement-bar', settings: { text: 'Old' } }, header: { type: 'header', settings: { logo_width: 120 } } }, order: ['announcement', 'header'] });
-const theme = sch.summarize({ settingsSchema, settingsData, indexTemplate, sections, groups: { 'header-group': headerGroup, 'other': '{}' } });
+const theme = sch.summarize({ settingsSchema, settingsData, indexTemplate, sections, groups: { 'header-group': headerGroup, 'other': '{}' }, templates: { product: productTemplate, collection: '{ not json' } });
 
 t('summarize: theme info, global settings with ids only, home-page sections only', () => {
   assert.strictEqual(theme.name, 'Dawn'); assert.strictEqual(theme.version, '15.0.0');
   assert.deepStrictEqual(theme.settings.map((s) => s.id), ['colors_accent_1', 'colors_background_1', 'type_header_font', 'logo', 'card_style', 'buttons_radius']);
   assert.deepStrictEqual(theme.settings[4].options, ['standard', 'card']);
-  assert.deepStrictEqual(Object.keys(theme.sections).sort(), ['featured-collection', 'image-banner'], 'header (group), product-only and preset-less sections are left out');
+  assert.deepStrictEqual(Object.keys(theme.sections).sort(), ['collapsible-content', 'featured-collection', 'image-banner'], 'header (group), product-only and preset-less sections are left out');
+  assert.deepStrictEqual(Object.keys(theme.templates), ['product'], 'a template that is not JSON is skipped');
+  assert.deepStrictEqual(theme.templates.product.sections.map((x) => `${x.key}:${x.type}:${x.blocks.map((b) => b.type).join('+')}`), ['main:main-product:title+text', 'rec:product-recommendations:']);
+  assert.deepStrictEqual(theme.templateSections.product.sort(), ['collapsible-content', 'featured-collection', 'image-banner', 'product-only'], 'what may be added on the product page: presets, allowed there');
+  assert.ok(!theme.templateSections.product.includes('main-product'), 'a main section (no presets) is never added');
   assert.strictEqual(theme.sections['image-banner'].maxBlocks, 3);
   assert.strictEqual(theme.sections['image-banner'].blocks[0].limit, 1);
   assert.deepStrictEqual(theme.indexOrder, ['old']);
@@ -85,6 +93,32 @@ t('validatePlan: keeps only real ids / types / options; images by slot; collecti
   assert.throws(() => plan.validatePlan({ sections: [{ type: 'nope' }] }, theme, assets), /no section/);
 });
 
+t('templates: existing product sections get settings + appended blocks within limits, new sections below; applyTemplate writes them', () => {
+  const p = plan.validatePlan({ sections: [{ type: 'image-banner', settings: {} }], templates: {
+    product: { existing: { main: { settings: { enable_sticky_info: true, nope: 1 }, blocks: [{ type: 'title', settings: {} }, { type: 'text', settings: { text: 'Buy 2 get 1 free' } }, { type: 'collapsible_tab', settings: { heading: 'Shipping', content: 'Free above 999' } }, { type: 'video', settings: {} }] }, ghost: { settings: {} } },
+      add: [{ type: 'collapsible-content', settings: { heading: 'FAQs' }, blocks: [{ type: 'collapsible_row', settings: { heading: 'Q1', row_content: 'A1' } }] }, { type: 'product-only', settings: {} }, { type: 'main-product', settings: {} }] },
+    collection: { existing: {}, add: [{ type: 'image-banner', settings: {} }] },
+  } }, theme, assets);
+  const t = p.templates.product;
+  assert.deepStrictEqual(Object.keys(t.existing), ['main']);
+  assert.deepStrictEqual(t.existing.main.settings, { enable_sticky_info: true });
+  assert.deepStrictEqual(t.existing.main.blocks.map((b) => b.type), ['text', 'collapsible_tab'], 'title at its limit (one exists), video not a block type');
+  assert.strictEqual(t.existing.main.blocks[1].settings.content, '<p>Free above 999</p>');
+  assert.deepStrictEqual(t.add.map((s) => s.type), ['collapsible-content', 'product-only'], 'main-product cannot be added');
+  assert.strictEqual(p.templates.collection, undefined, 'a template the theme does not have is dropped');
+  assert.ok(p.notes.some((n) => /ghost/.test(n)) && p.notes.some((n) => /collection/.test(n)) && p.notes.some((n) => /nope/.test(n)));
+  const out = JSON.parse(plan.applyTemplate(productTemplate, t, {}));
+  assert.deepStrictEqual(out.order, ['main', 'rec', 'builder_1_collapsible_content', 'builder_2_product_only']);
+  assert.deepStrictEqual(out.sections.main.settings, { show_compare: true, enable_sticky_info: true });
+  assert.deepStrictEqual(out.sections.main.block_order, ['title', 't1', 'builder_text_1', 'builder_collapsible_tab_2']);
+  assert.strictEqual(out.sections.main.blocks.t1.settings.text, 'old', 'existing blocks untouched');
+  assert.strictEqual(out.sections.main.blocks.builder_text_1.settings.text, 'Buy 2 get 1 free');
+  assert.deepStrictEqual(out.sections.builder_1_collapsible_content.block_order, ['collapsible_row_1']);
+  assert.strictEqual(out.sections.rec.type, 'product-recommendations', 'other sections kept');
+  const pr = plan.planPrompt(theme, { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [], collections: [], offers: [], policies: { shipping: '', refund: '' } }, assets, 'S');
+  assert.ok(pr.includes('TEMPLATE product') && pr.includes('key main (type main-product)') && pr.includes('has blocks: title, text') && pr.includes('you may ADD on the product page') && pr.includes('product-only'));
+});
+
 t('applyPlan: settings_data keeps the rest, index.json has the new sections in order, banner tokens resolved', () => {
   const p = plan.validatePlan({ settings: { colors_accent_1: '#108474', logo: 'banner:hero' }, sections: [{ type: 'image-banner', settings: { image: 'banner:hero' }, blocks: [{ type: 'heading', settings: { heading: 'Hi' } }] }, { type: 'featured-collection', settings: { collection: 'jhumkas' } }] }, theme, assets);
   const out = plan.applyPlan(theme, p, settingsData, { hero: 'shopify://shop_images/builder-hero.jpg' });
@@ -105,7 +139,7 @@ t('planPrompt lists only real ids and the slots; fontHandle maps names', () => {
   const style = { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [{ type: 'hero-banner', title: 'x', note: 'y' }], collections: [], offers: [], policies: { shipping: '', refund: '' } };
   const pr = plan.planPrompt(theme, style, assets, 'S');
   assert.ok(pr.includes('colors_accent_1 (color') && pr.includes('image-banner') && pr.includes('banner:hero') && pr.includes('jhumkas: Jhumkas'));
-  assert.ok(!pr.includes('main-product'));
+  assert.ok(!pr.slice(pr.indexOf('SECTION TYPES you may use on the home page'), pr.indexOf('GROUP ')).includes('main-product'), 'product-only sections are not offered for the home page');
   assert.strictEqual(plan.fontHandle('Playfair Display'), 'playfair_display_n4');
   assert.strictEqual(plan.fontHandle('poppins_n6'), 'poppins_n6');
   assert.strictEqual(plan.fontHandle('Comic Sans'), null);

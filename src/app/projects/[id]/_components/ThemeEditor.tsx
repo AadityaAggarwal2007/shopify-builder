@@ -7,12 +7,15 @@ import { api } from '@/lib/client';
 import SettingField, { isEditable, prettyLabel, type Def, type Pickers } from './SettingField';
 
 interface SectionDef { type: string; name: string; settings: Def[]; blocks: { type: string; name: string; settings: Def[]; limit?: number }[]; maxBlocks?: number }
+interface TemplateSection { key: string; type: string; blocks: { key: string; type: string }[] }
 interface Schema {
-  theme: { name: string; settings: Def[]; sections: Record<string, SectionDef>; allSections: Record<string, SectionDef>; groups: Record<string, { key: string; type: string }[]> };
+  theme: { name: string; settings: Def[]; sections: Record<string, SectionDef>; allSections: Record<string, SectionDef>; groups: Record<string, { key: string; type: string }[]>; templates: Record<string, { sections: TemplateSection[] }>; templateSections: Record<string, string[]> };
   assets: { banners: { slot: string; alt: string }[]; collections: { handle: string; title: string }[]; products: { handle: string; title: string }[] };
   fonts: Record<string, string>;
 }
-export interface Plan { settings: Record<string, unknown>; sections: { type: string; settings: Record<string, unknown>; blocks: { type: string; settings: Record<string, unknown> }[] }[]; groups?: Record<string, Record<string, Record<string, unknown>>>; notes: string[] }
+export interface PlanSection { type: string; settings: Record<string, unknown>; blocks: { type: string; settings: Record<string, unknown> }[] }
+export interface PlanTemplate { existing: Record<string, { settings: Record<string, unknown>; blocks: { type: string; settings: Record<string, unknown> }[] }>; add: PlanSection[] }
+export interface Plan { settings: Record<string, unknown>; sections: PlanSection[]; groups?: Record<string, Record<string, Record<string, unknown>>>; templates?: Record<string, PlanTemplate>; notes: string[] }
 type Vals = Record<string, unknown>;
 
 const setIn = (o: Vals, k: string, v: unknown): Vals => { const n = { ...o }; if (v === undefined) delete n[k]; else n[k] = v; return n; };
@@ -25,11 +28,72 @@ function Fields({ defs, vals, onChange, pickers }: { defs: Def[]; vals: Vals; on
   return <div className="grid-2" style={{ marginTop: 8 }}>{list.map((d) => <SettingField key={d.id} def={d} value={vals[d.id]} pickers={pickers} onChange={(v) => onChange(setIn(vals, d.id, v))} />)}</div>;
 }
 
+// A list of sections (the home page, or the ones added to a template): add / remove / reorder, settings, blocks.
+function SectionList({ sections, defs, pickers, onChange }: { sections: PlanSection[]; defs: Record<string, SectionDef>; pickers: Pickers; onChange: (list: PlanSection[]) => void }) {
+  const types = Object.values(defs).sort((a, b) => a.name.localeCompare(b.name));
+  const upd = (i: number, f: (s: PlanSection) => PlanSection) => onChange(sections.map((x, k) => (k === i ? f(x) : x)));
+  return (
+    <div style={{ marginTop: 10 }}>
+      {sections.map((s, i) => {
+        const def = defs[s.type];
+        if (!def) return <div key={i} className="alert alert-warn">Section &quot;{s.type}&quot; is not allowed here.</div>;
+        const canAdd = !def.maxBlocks || s.blocks.length < def.maxBlocks;
+        return (
+          <details key={i} className="card" style={{ padding: 10, marginTop: 8 }}>
+            <summary style={{ cursor: 'pointer' }} className="row">
+              <b>{i + 1}. {def.name}</b> <span className="mono small muted">{s.type}</span>
+              <span className="small muted">· {countSet(def.settings, s.settings)} set · {s.blocks.length} block{s.blocks.length === 1 ? '' : 's'}</span>
+              <span style={{ flex: 1 }} />
+              <button className="btn btn-sm" title="Move up" onClick={(e) => { e.preventDefault(); onChange(move(sections, i, -1)); }}><ArrowUp size={12} /></button>
+              <button className="btn btn-sm" title="Move down" onClick={(e) => { e.preventDefault(); onChange(move(sections, i, 1)); }}><ArrowDown size={12} /></button>
+              <button className="btn btn-sm btn-danger" title="Remove section" onClick={(e) => { e.preventDefault(); if (confirm(`Remove "${def.name}"?`)) onChange(sections.filter((_, k) => k !== i)); }}><Trash2 size={12} /></button>
+            </summary>
+            <Fields defs={def.settings} vals={s.settings} pickers={pickers} onChange={(v) => upd(i, (x) => ({ ...x, settings: v }))} />
+            {def.blocks.length > 0 && (
+              <div style={{ marginTop: 10, paddingLeft: 10, borderLeft: '3px solid var(--border)' }}>
+                <div className="small"><b>Blocks</b></div>
+                {s.blocks.map((b, j) => {
+                  const bd = def.blocks.find((x) => x.type === b.type);
+                  return (
+                    <details key={j} style={{ marginTop: 6 }}>
+                      <summary className="row small" style={{ cursor: 'pointer' }}>
+                        <b>{j + 1}. {bd?.name || b.type}</b> <span className="muted">· {bd ? countSet(bd.settings, b.settings) : 0} set</span>
+                        <span style={{ flex: 1 }} />
+                        <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); upd(i, (x) => ({ ...x, blocks: move(x.blocks, j, -1) })); }}><ArrowUp size={12} /></button>
+                        <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); upd(i, (x) => ({ ...x, blocks: move(x.blocks, j, 1) })); }}><ArrowDown size={12} /></button>
+                        <button className="btn btn-sm btn-danger" onClick={(e) => { e.preventDefault(); upd(i, (x) => ({ ...x, blocks: x.blocks.filter((_, m) => m !== j) })); }}><Trash2 size={12} /></button>
+                      </summary>
+                      {bd ? <Fields defs={bd.settings} vals={b.settings} pickers={pickers} onChange={(v) => upd(i, (x) => ({ ...x, blocks: x.blocks.map((y, m) => (m === j ? { ...y, settings: v } : y)) }))} /> : <div className="small muted">Unknown block type.</div>}
+                    </details>
+                  );
+                })}
+                <div className="row" style={{ marginTop: 8 }}>
+                  <select className="select" style={{ width: 'auto' }} value="" disabled={!canAdd} onChange={(e) => { const t = e.target.value; if (!t) return; const bd = def.blocks.find((x) => x.type === t)!; if (bd.limit && s.blocks.filter((x) => x.type === t).length >= bd.limit) { alert(`This section allows at most ${bd.limit} "${bd.name}" block(s).`); return; } upd(i, (x) => ({ ...x, blocks: [...x.blocks, { type: t, settings: {} }] })); }}>
+                    <option value="">{canAdd ? '+ Add block…' : `Max ${def.maxBlocks} blocks`}</option>
+                    {def.blocks.map((b) => <option key={b.type} value={b.type}>{b.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+          </details>
+        );
+      })}
+      <div className="row" style={{ marginTop: 10 }}>
+        <Plus size={14} />
+        <select className="select" style={{ width: 'auto' }} value="" onChange={(e) => { const t = e.target.value; if (t) onChange([...sections, { type: t, settings: {}, blocks: [] }]); }}>
+          <option value="">Add a section…</option>
+          {types.map((d) => <option key={d.type} value={d.type}>{d.name} ({d.type})</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 export default function ThemeEditor({ projectId, plan, onSaved }: { projectId: string; plan: Plan; onSaved: (p: Plan) => void }) {
   const [schema, setSchema] = useState<Schema | null>(null);
   const [draft, setDraft] = useState<Plan>(plan);
   const [dirty, setDirty] = useState(false);
-  const [tab, setTab] = useState<'home' | 'theme' | 'groups'>('home');
+  const [tab, setTab] = useState<'home' | 'theme' | 'groups' | 'product' | 'collection'>('home');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   useEffect(() => { api<Schema>(`/api/projects/${projectId}/theme/schema`).then(setSchema).catch((e) => setErr(e.message)); }, [projectId]);
@@ -46,7 +110,6 @@ export default function ThemeEditor({ projectId, plan, onSaved }: { projectId: s
   if (err && !schema) return <div className="alert alert-bad">{err}</div>;
   if (!schema) return <div className="muted small">Loading the theme&apos;s settings…</div>;
   const pickers: Pickers = { ...schema.assets, fonts: schema.fonts };
-  const sectionTypes = Object.values(schema.theme.sections).sort((a, b) => a.name.localeCompare(b.name));
   const groups = schema.theme.groups;
   const globalGroups = Array.from(new Set(schema.theme.settings.map((d) => d.group)));
 
@@ -54,7 +117,7 @@ export default function ThemeEditor({ projectId, plan, onSaved }: { projectId: s
     <div style={{ marginTop: 12 }}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div className="row" style={{ gap: 4 }}>
-          {([['home', `Home page (${draft.sections.length})`], ['theme', `Theme settings (${Object.keys(draft.settings).length})`], ['groups', 'Header & footer']] as const).map(([k, l]) => <button key={k} className={`btn btn-sm${tab === k ? ' btn-primary' : ''}`} onClick={() => setTab(k)}>{l}</button>)}
+          {([['home', `Home page (${draft.sections.length})`], ['theme', `Theme settings (${Object.keys(draft.settings).length})`], ['groups', 'Header & footer'], ['product', 'Product page'], ['collection', 'Collection page']] as const).filter(([k]) => (k !== 'product' && k !== 'collection') || schema.theme.templates[k]).map(([k, l]) => <button key={k} className={`btn btn-sm${tab === k ? ' btn-primary' : ''}`} onClick={() => setTab(k)}>{l}</button>)}
         </div>
         <div className="row">
           {dirty && <span className="chip chip-warn">Unsaved changes</span>}
@@ -65,59 +128,53 @@ export default function ThemeEditor({ projectId, plan, onSaved }: { projectId: s
       <p className="small muted" style={{ margin: '6px 0 0' }}>A blank field keeps the theme&apos;s own value. After saving, press <b>Build zip</b>, <b>Send to store</b> and <b>Preview</b> again to see it.</p>
 
       {tab === 'home' && (
+        <SectionList sections={draft.sections} defs={schema.theme.sections} pickers={pickers} onChange={(list) => edit((p) => ({ ...p, sections: list }))} />
+      )}
+
+      {(tab === 'product' || tab === 'collection') && schema.theme.templates[tab] && (
         <div style={{ marginTop: 10 }}>
-          {draft.sections.map((s, i) => {
-            const def = schema.theme.sections[s.type];
-            if (!def) return <div key={i} className="alert alert-warn">Section &quot;{s.type}&quot; is not in this theme.</div>;
-            const blockTypes = def.blocks;
-            const canAdd = !def.maxBlocks || s.blocks.length < def.maxBlocks;
+          <div className="small"><b>Sections this page already has</b> <span className="muted">(kept; change their settings, add blocks)</span></div>
+          {schema.theme.templates[tab].sections.map((sec) => {
+            const def = schema.theme.allSections[sec.type];
+            if (!def) return null;
+            const cur = draft.templates?.[tab]?.existing?.[sec.key] || { settings: {}, blocks: [] };
+            const setExisting = (next: { settings: Record<string, unknown>; blocks: { type: string; settings: Record<string, unknown> }[] }) => edit((p) => {
+              const t = { existing: { ...(p.templates?.[tab]?.existing || {}) }, add: p.templates?.[tab]?.add || [] };
+              if (Object.keys(next.settings).length || next.blocks.length) t.existing[sec.key] = next; else delete t.existing[sec.key];
+              return { ...p, templates: { ...(p.templates || {}), [tab]: t } };
+            });
+            const already = sec.blocks.length + cur.blocks.length;
+            const canAdd = def.blocks.length > 0 && (!def.maxBlocks || already < def.maxBlocks);
             return (
-              <details key={i} className="card" style={{ padding: 10, marginTop: 8 }}>
-                <summary style={{ cursor: 'pointer' }} className="row">
-                  <b>{i + 1}. {def.name}</b> <span className="mono small muted">{s.type}</span>
-                  <span className="small muted">· {countSet(def.settings, s.settings)} set · {s.blocks.length} block{s.blocks.length === 1 ? '' : 's'}</span>
-                  <span style={{ flex: 1 }} />
-                  <button className="btn btn-sm" title="Move up" onClick={(e) => { e.preventDefault(); edit((p) => ({ ...p, sections: move(p.sections, i, -1) })); }}><ArrowUp size={12} /></button>
-                  <button className="btn btn-sm" title="Move down" onClick={(e) => { e.preventDefault(); edit((p) => ({ ...p, sections: move(p.sections, i, 1) })); }}><ArrowDown size={12} /></button>
-                  <button className="btn btn-sm btn-danger" title="Remove section" onClick={(e) => { e.preventDefault(); if (confirm(`Remove "${def.name}" from the home page?`)) edit((p) => ({ ...p, sections: p.sections.filter((_, k) => k !== i) })); }}><Trash2 size={12} /></button>
-                </summary>
-                <Fields defs={def.settings} vals={s.settings} pickers={pickers} onChange={(v) => edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, settings: v } : x)) }))} />
-                {blockTypes.length > 0 && (
+              <details key={sec.key} className="card" style={{ padding: 10, marginTop: 6 }} open={Object.keys(cur.settings).length > 0 || cur.blocks.length > 0}>
+                <summary style={{ cursor: 'pointer' }}><b>{def.name}</b> <span className="mono small muted">{sec.key}</span> <span className="small muted">· {countSet(def.settings, cur.settings)} set{sec.blocks.length ? ` · has ${sec.blocks.map((b) => b.type).join(', ')}` : ''}{cur.blocks.length ? ` · +${cur.blocks.length} added` : ''}</span></summary>
+                <Fields defs={def.settings} vals={cur.settings} pickers={pickers} onChange={(v) => setExisting({ ...cur, settings: v })} />
+                {def.blocks.length > 0 && (
                   <div style={{ marginTop: 10, paddingLeft: 10, borderLeft: '3px solid var(--border)' }}>
-                    <div className="small"><b>Blocks</b></div>
-                    {s.blocks.map((b, j) => {
-                      const bd = blockTypes.find((x) => x.type === b.type);
+                    <div className="small"><b>Blocks added</b></div>
+                    {cur.blocks.map((b, j) => {
+                      const bd = def.blocks.find((x) => x.type === b.type);
                       return (
                         <details key={j} style={{ marginTop: 6 }}>
-                          <summary className="row small" style={{ cursor: 'pointer' }}>
-                            <b>{j + 1}. {bd?.name || b.type}</b> <span className="muted">· {bd ? countSet(bd.settings, b.settings) : 0} set</span>
-                            <span style={{ flex: 1 }} />
-                            <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, blocks: move(x.blocks, j, -1) } : x)) })); }}><ArrowUp size={12} /></button>
-                            <button className="btn btn-sm" onClick={(e) => { e.preventDefault(); edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, blocks: move(x.blocks, j, 1) } : x)) })); }}><ArrowDown size={12} /></button>
-                            <button className="btn btn-sm btn-danger" onClick={(e) => { e.preventDefault(); edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, blocks: x.blocks.filter((_, m) => m !== j) } : x)) })); }}><Trash2 size={12} /></button>
+                          <summary className="row small" style={{ cursor: 'pointer' }}><b>{j + 1}. {bd?.name || b.type}</b><span style={{ flex: 1 }} />
+                            <button className="btn btn-sm btn-danger" onClick={(e) => { e.preventDefault(); setExisting({ ...cur, blocks: cur.blocks.filter((_, m) => m !== j) }); }}><Trash2 size={12} /></button>
                           </summary>
-                          {bd ? <Fields defs={bd.settings} vals={b.settings} pickers={pickers} onChange={(v) => edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, blocks: x.blocks.map((y, m) => (m === j ? { ...y, settings: v } : y)) } : x)) }))} /> : <div className="small muted">Unknown block type.</div>}
+                          {bd && <Fields defs={bd.settings} vals={b.settings} pickers={pickers} onChange={(v) => setExisting({ ...cur, blocks: cur.blocks.map((y, m) => (m === j ? { ...y, settings: v } : y)) })} />}
                         </details>
                       );
                     })}
-                    <div className="row" style={{ marginTop: 8 }}>
-                      <select className="select" style={{ width: 'auto' }} value="" disabled={!canAdd} onChange={(e) => { const t = e.target.value; if (!t) return; const bd = blockTypes.find((x) => x.type === t)!; if (bd.limit && s.blocks.filter((x) => x.type === t).length >= bd.limit) { alert(`This section allows at most ${bd.limit} "${bd.name}" block(s).`); return; } edit((p) => ({ ...p, sections: p.sections.map((x, k) => (k === i ? { ...x, blocks: [...x.blocks, { type: t, settings: {} }] } : x)) })); }}>
-                        <option value="">{canAdd ? '+ Add block…' : `Max ${def.maxBlocks} blocks`}</option>
-                        {blockTypes.map((b) => <option key={b.type} value={b.type}>{b.name}</option>)}
-                      </select>
-                    </div>
+                    <select className="select" style={{ width: 'auto', marginTop: 8 }} value="" disabled={!canAdd} onChange={(e) => { const t = e.target.value; if (!t) return; setExisting({ ...cur, blocks: [...cur.blocks, { type: t, settings: {} }] }); }}>
+                      <option value="">{canAdd ? '+ Add block…' : `Max ${def.maxBlocks} blocks`}</option>
+                      {def.blocks.map((b) => <option key={b.type} value={b.type}>{b.name}</option>)}
+                    </select>
                   </div>
                 )}
               </details>
             );
           })}
-          <div className="row" style={{ marginTop: 10 }}>
-            <Plus size={14} />
-            <select className="select" style={{ width: 'auto' }} value="" onChange={(e) => { const t = e.target.value; if (t) edit((p) => ({ ...p, sections: [...p.sections, { type: t, settings: {}, blocks: [] }] })); }}>
-              <option value="">Add a section…</option>
-              {sectionTypes.map((d) => <option key={d.type} value={d.type}>{d.name} ({d.type})</option>)}
-            </select>
-          </div>
+          <div className="small" style={{ marginTop: 14 }}><b>Sections added below</b></div>
+          <SectionList sections={draft.templates?.[tab]?.add || []} defs={Object.fromEntries((schema.theme.templateSections[tab] || []).map((t) => [t, schema.theme.allSections[t]]).filter(([, d]) => d))} pickers={pickers}
+            onChange={(list) => edit((p) => ({ ...p, templates: { ...(p.templates || {}), [tab]: { existing: p.templates?.[tab]?.existing || {}, add: list } } }))} />
         </div>
       )}
 

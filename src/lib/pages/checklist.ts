@@ -11,5 +11,8 @@ export const CHECKLIST: ChecklistItem[] = [
   { key: 'password', title: 'Remove the storefront password (Private mode off)', why: 'Otherwise visitors see "Opening soon".', path: '/online_store/preferences' },
   { key: 'legal', title: 'Read the 4 policies once', why: 'The AI wrote them from your facts; check the numbers.', path: '/settings/legal' },
   { key: 'notifications', title: 'Order emails: sender name and logo', why: 'Customers get these from the first order.', path: '/settings/notifications' },
+  { key: 'app_reviews', title: 'Reviews app (Judge.me / Loox) for star ratings and customer reviews', why: 'A theme cannot show reviews by itself; the reference uses an app.', path: '/apps' },
+  { key: 'app_offers', title: 'Offers app (Buy 1 Get 1, bundles, free gift) if your product page needs it', why: 'Discounts beyond a plain sale price need an app or Shopify Discounts.', path: '/discounts' },
+  { key: 'app_urgency', title: 'Delivery-estimate / "selling fast" app (optional)', why: 'Delivery dates and stock urgency lines on the product page come from an app.', path: '/apps' },
   { key: 'tracking_app', title: 'Install ShipTrack chat widget + tracking (optional)', why: 'Your own support + tracking, as on the other stores.', path: '/settings/apps' },
 ];

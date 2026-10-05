@@ -1,3 +1,5 @@
+import { PRODUCT_FEATURES, type ProductFeature } from './product-features';
+export { PRODUCT_FEATURES, type ProductFeature };
 // Reads a reference website without a browser: the HTML, up to 5 of its stylesheets, and (when it
 // is a Shopify store) its public /products.json and /collections.json. Pulls out STRUCTURE only:
 // title, nav, headings in order, Shopify section types in order, the most used colours, the font
@@ -17,8 +19,43 @@ export interface SiteRead {
   collections: { title: string; handle: string; count?: number }[];
   products: { title: string; type: string; vendor: string; price: string; tags: string[] }[];
   textSample: string;                // ~2500 chars of visible text, for the tone only
+  pages: { collection?: string; product?: string };   // the collection / product pages that were read
+  collectionPage: SiteSection[];     // every section of one collection page, in order
+  productPage: SiteSection[];        // every section of one product page, in order
+  productFeatures: ProductFeature[]; // what the product page shows (compare price, rating, offer line, urgency ...)
+  productOptions: string[];          // option names (Colour, Size ...) from the product's JSON
+  variantCount: number;
   errors: string[];
 }
+
+
+const TRUST = /free shipping|secure (payment|checkout)|easy returns?|\d+[- ]days? (return|replacement)|cash on delivery|\bcod\b|24\s*[x\/]\s*7|money[- ]back|100% (original|genuine|authentic|secure)/gi;
+export function productFeatures(html: string): ProductFeature[] {
+  const h = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const text = stripTags(h);
+  const has = (re: RegExp, on: string = text) => re.test(on);
+  const out: ProductFeature[] = [];
+  if (has(/<(s|del|strike)\b|compare[-_ ]?(at|price)|price__sale|price--on-sale|was[-_ ]price|old[-_ ]price/i, h)) out.push('compare_price');
+  if (has(/save\s*(₹|rs\.?\s*)?\d+(\.\d+)?\s*%|\d+\s*%\s*off/i)) out.push('save_percent');
+  if (has(/tax(es)?\s*(included|incl)/i)) out.push('tax_included');
+  if (has(/\d(\.\d)?\s*(out of 5|\/\s*5\b)|\d(\.\d)?\s*stars?\b|jdgm-prev-badge|spr-badge|loox-rating|star[-_ ]rating|class=["'][^"']*\brating\b/i, h)) out.push('rating');
+  if (has(/customer reviews|\d+\s*reviews?\b|jdgm-rev|spr-reviews|loox-reviews|review-widget|yotpo|write a review/i, h)) out.push('reviews');
+  if (has(/buy\s*\d+\s*,?\s*get\s*\d+|\bbogo\b|b1g1|flat\s*\d+\s*%|free gift|combo offer|\d+\s*%\s*off on/i)) out.push('offer_badge');
+  if (has(/variant-picker|product-form__input|swatch|data-option-index|data-option|option-value|options\[|name=["']options/i, h)) out.push('variants');
+  if (has(/selling fast|only\s*\d+\s*left|hurry|low stock|\d+\s*(people|others)\s*(are\s*)?(viewing|looking)|sold in the last|left in stock|almost gone/i)) out.push('urgency');
+  if (has(/estimated delivery|get it by|delivery by|order (within|in)\s|your order (will|would|arrives)|arrives? (by|between)|ships? (within|in)\s*\d|expected delivery|dispatch(ed)? (within|in)/i)) out.push('delivery_estimate');
+  if (has(/size (chart|guide)/i)) out.push('size_chart');
+  if (has(/\bfaqs?\b|frequently asked|questions? (&|and) answers/i)) out.push('faq');
+  if (has(/<video\b|<iframe[^>]+(youtube|vimeo)|\.mp4\b/i, h)) out.push('video');
+  if (new Set(Array.from(text.matchAll(TRUST)).map((m) => m[0].toLowerCase().replace(/\s+/g, ' '))).size >= 2) out.push('trust_badges');
+  if (has(/wa\.me|api\.whatsapp|whatsapp/i, h)) out.push('whatsapp');
+  if (has(/sticky[-_ ]?(add[-_ ]?to[-_ ]?cart|atc|cart|buy)|atc[-_ ]sticky|sticky[-_ ]bar/i, h)) out.push('sticky_cart');
+  if (has(/you may also like|related products|recommended (for you|products)|product-recommendations|customers also|similar products|complete the look|pair it with|you might also/i, h)) out.push('recommendations');
+  if (has(/frequently bought|\bbundle\b|buy together|complete the set/i)) out.push('bundle');
+  if (has(/wishlist/i, h)) out.push('wishlist');
+  return out;
+}
+
 
 // One section of the reference home page: its type and what it holds (counts, headings, the kind of text).
 export interface SiteSection {
@@ -115,7 +152,7 @@ export function parseSections(html: string): SiteSection[] {
   return out;
 }
 
-export function parseHtml(html: string, baseUrl: string): Omit<SiteRead, 'url' | 'finalUrl' | 'policies' | 'collections' | 'products' | 'errors' | 'colors' | 'fonts'> & { stylesheets: string[]; inlineCss: string; policyLinks: string[]; colorsRaw: string; } {
+export function parseHtml(html: string, baseUrl: string): Omit<SiteRead, 'url' | 'finalUrl' | 'policies' | 'collections' | 'products' | 'errors' | 'colors' | 'fonts' | 'pages' | 'collectionPage' | 'productPage' | 'productFeatures' | 'productOptions' | 'variantCount'> & { stylesheets: string[]; inlineCss: string; policyLinks: string[]; colorsRaw: string; } {
   const title = stripTags((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').slice(0, 200);
   const description = decode((html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i) || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i) || [])[1] || '').slice(0, 300);
   const isShopify = /cdn\.shopify\.com|Shopify\.theme|shopify-section/i.test(html);
@@ -193,7 +230,7 @@ export function extractColorsAndFonts(css: string): { colors: { value: string; c
   return { colors, fonts: Array.from(fonts) };
 }
 
-export async function readSite(inputUrl: string): Promise<SiteRead> {
+export async function readSite(inputUrl: string, more: { collectionUrl?: string; productUrl?: string } = {}): Promise<SiteRead> {
   const url = normalizeUrl(inputUrl);
   if (!url) throw new Error('That does not look like a website address');
   const errors: string[] = [];
@@ -231,5 +268,30 @@ export async function readSite(inputUrl: string): Promise<SiteRead> {
       else errors.push(`products.json answered ${r.status}`);
     } catch (e) { errors.push(`products.json: ${(e as Error).message}`); }
   }
-  return { url, finalUrl: page.finalUrl, title: parsed.title, description: parsed.description, isShopify: parsed.isShopify, nav: parsed.nav, headings: parsed.headings, sectionTypes: parsed.sectionTypes, sections: parsed.sections, colors, fonts, imageCount: parsed.imageCount, policies, collections, products, textSample: parsed.textSample, errors };
+  // One collection page and one product page: the ones the owner gave, else the first ones the store lists.
+  const origin = new URL(page.finalUrl).origin;
+  const homeLinks = Array.from(page.text.matchAll(/href=["']([^"']+)["']/gi)).map((m) => absolute(m[1], page.finalUrl));
+  const pages: SiteRead['pages'] = {};
+  const collectionUrl = normalizeUrl(more.collectionUrl || '') || (collections.find((c) => (c.count ?? 1) > 0 && c.handle) ? `${origin}/collections/${collections.find((c) => (c.count ?? 1) > 0 && c.handle)!.handle}` : homeLinks.find((l) => /\/collections\/(?!all\b)[a-z0-9-]+\/?$/i.test(l)));
+  const productUrl = normalizeUrl(more.productUrl || '') || homeLinks.find((l) => /\/products\/[a-z0-9-]+\/?$/i.test(l)) || (parsed.isShopify && products.length ? undefined : undefined);
+  let collectionPage: SiteSection[] = [], productPage: SiteSection[] = [], features: ProductFeature[] = [], productOptions: string[] = [], variantCount = 0;
+  if (collectionUrl) {
+    try { const r = await fetchText(collectionUrl, 15_000); if (r.status < 400) { collectionPage = parseSections(r.text); pages.collection = r.finalUrl; } else errors.push(`collection page answered ${r.status}`); } catch (e) { errors.push(`collection page: ${(e as Error).message}`); }
+  }
+  let productHref = productUrl;
+  if (!productHref && parsed.isShopify) {
+    // products.json carries handles: use the first.
+    try { const r = await fetchText(`${origin}/products.json?limit=1`, 10_000, 'application/json'); const h = r.status < 400 ? JSON.parse(r.text).products?.[0]?.handle : null; if (h) productHref = `${origin}/products/${h}`; } catch { /* no product page then */ }
+  }
+  if (productHref) {
+    try {
+      const r = await fetchText(productHref, 15_000);
+      if (r.status < 400) { productPage = parseSections(r.text); features = productFeatures(r.text); pages.product = r.finalUrl; } else errors.push(`product page answered ${r.status}`);
+      const m = productHref.match(/\/products\/([a-z0-9-]+)/i);
+      if (m && parsed.isShopify) {
+        try { const j = await fetchText(`${origin}/products/${m[1]}.js`, 10_000, 'application/json'); const pj = j.status < 400 ? JSON.parse(j.text) : null; if (pj) { productOptions = (Array.isArray(pj.options) ? pj.options : []).map((o: unknown) => (typeof o === 'string' ? o : String((o as { name?: string })?.name || ''))).filter(Boolean).slice(0, 5); variantCount = Array.isArray(pj.variants) ? pj.variants.length : 0; } } catch { /* fine */ }
+      }
+    } catch (e) { errors.push(`product page: ${(e as Error).message}`); }
+  }
+  return { url, finalUrl: page.finalUrl, title: parsed.title, description: parsed.description, isShopify: parsed.isShopify, nav: parsed.nav, headings: parsed.headings, sectionTypes: parsed.sectionTypes, sections: parsed.sections, colors, fonts, imageCount: parsed.imageCount, policies, collections, products, textSample: parsed.textSample, pages, collectionPage, productPage, productFeatures: features, productOptions, variantCount, errors };
 }

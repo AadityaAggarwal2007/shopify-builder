@@ -25,7 +25,7 @@ export const POST = handle(async (request: NextRequest, { params }: Ctx) => {
   const url = normalizeUrl(String(body.url || ''));
   if (!url) throw new HttpError(400, 'Paste the website address, e.g. https://example.com');
   try {
-    const r = await buildStyleSheet(project.id, url);
+    const r = await buildStyleSheet(project.id, url, { collectionUrl: String(body.collectionUrl || ''), productUrl: String(body.productUrl || '') });
     return NextResponse.json({ style_sheet: r.style, reference_read: r.site });
   } catch (err) {
     throw new HttpError(400, (err as Error).message);

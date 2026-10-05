@@ -5,7 +5,8 @@ import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 export interface PlanBlock { type: string; settings: Record<string, unknown> }
 export interface PlanSection { type: string; settings: Record<string, unknown>; blocks: PlanBlock[] }
-export interface ThemePlan { settings: Record<string, unknown>; sections: PlanSection[]; groups: Record<string, Record<string, Record<string, unknown>>>; notes: string[] }  // groups: file -> section key -> settings
+export interface PlanTemplate { existing: Record<string, { settings: Record<string, unknown>; blocks: PlanBlock[] }>; add: PlanSection[] }   // existing: by key, settings + blocks APPENDED; add: sections appended below
+export interface ThemePlan { settings: Record<string, unknown>; sections: PlanSection[]; groups: Record<string, Record<string, Record<string, unknown>>>; templates?: Record<string, PlanTemplate>; notes: string[] }  // groups: file -> section key -> settings; templates: product / collection
 
 export interface PlanAssets {
   banners: { slot: string; alt: string }[];           // uploaded banners / logo by slot (hero, hero_mobile, offer, logo, collection_1 ...)
@@ -83,22 +84,7 @@ export function validatePlan(raw: unknown, theme: ThemeSummary, assets: PlanAsse
   const notes: string[] = [];
   const j = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const settings = checkSettings(theme.settings, j.settings, assets, notes);
-  const sections: PlanSection[] = [];
-  for (const s of (Array.isArray(j.sections) ? j.sections : []) as Record<string, unknown>[]) {
-    const type = typeof s?.type === 'string' ? s.type : '';
-    const def: SectionDef | undefined = theme.sections[type];
-    if (!def) { notes.push(`section "${type}": not in this theme, dropped`); continue; }
-    const blocks: PlanBlock[] = [];
-    for (const b of (Array.isArray(s.blocks) ? s.blocks : []) as Record<string, unknown>[]) {
-      const bdef = def.blocks.find((x) => x.type === b?.type);
-      if (!bdef) { if (b?.type) notes.push(`${type}: block "${String(b.type)}" not allowed, dropped`); continue; }
-      if (bdef.limit && blocks.filter((x) => x.type === bdef.type).length >= bdef.limit) continue;
-      if (def.maxBlocks && blocks.length >= def.maxBlocks) break;
-      blocks.push({ type: bdef.type, settings: checkSettings(bdef.settings, b.settings, assets, notes) });
-    }
-    sections.push({ type, settings: checkSettings(def.settings, s.settings, assets, notes), blocks });
-    if (sections.length >= 24) break;
-  }
+  const sections = checkSectionList(j.sections, (type) => theme.sections[type], assets, notes, 24);
   if (!sections.length) throw new Error('The AI proposed no section this theme has');
   // Header / footer groups: only settings of sections that already exist in the group, by key.
   const groups: ThemePlan['groups'] = {};
@@ -114,8 +100,51 @@ export function validatePlan(raw: unknown, theme: ThemeSummary, assets: PlanAsse
       if (Object.keys(checked).length) (groups[file] ||= {})[key] = checked;
     }
   }
+  // Product / collection templates: settings + appended blocks on the sections they already hold, and new sections below.
+  const templates: Record<string, PlanTemplate> = {};
+  const rawT = (j.templates && typeof j.templates === 'object' ? j.templates : {}) as Record<string, Record<string, unknown>>;
+  for (const [name, t] of Object.entries(rawT)) {
+    const held = theme.templates[name];
+    if (!held || !t || typeof t !== 'object') { notes.push(`template "${name}": not in this theme, dropped`); continue; }
+    const existing: PlanTemplate['existing'] = {};
+    for (const [key, raw] of Object.entries((t.existing && typeof t.existing === 'object' ? t.existing : {}) as Record<string, Record<string, unknown>>)) {
+      const sec = held.sections.find((x) => x.key === key);
+      const def = sec ? theme.allSections[sec.type] : undefined;
+      if (!sec || !def) { notes.push(`${name}/${key}: no such section, dropped`); continue; }
+      const settings = checkSettings(def.settings, raw?.settings, assets, notes);
+      const blocks = checkBlocks(def, raw?.blocks, assets, notes, sec.blocks.map((b) => b.type));
+      if (Object.keys(settings).length || blocks.length) existing[key] = { settings, blocks };
+    }
+    const add = checkSectionList(t.add, (type) => ((theme.templateSections[name] || []).includes(type) ? theme.allSections[type] : undefined), assets, notes, 10);
+    if (Object.keys(existing).length || add.length) templates[name] = { existing, add };
+  }
   for (const n of (Array.isArray(j.notes) ? j.notes : []).slice(0, 10)) if (typeof n === 'string' && n.trim()) notes.push(`AI: ${n.trim().slice(0, 160)}`);
-  return { settings, sections, groups, notes };
+  return { settings, sections, groups, templates, notes };
+}
+
+// Blocks for one section, within the block type's limit and the section's max_blocks (counting the ones it already has).
+function checkBlocks(def: SectionDef, raw: unknown, assets: PlanAssets, notes: string[], already: string[] = []): PlanBlock[] {
+  const blocks: PlanBlock[] = [];
+  for (const b of (Array.isArray(raw) ? raw : []) as Record<string, unknown>[]) {
+    const bdef = def.blocks.find((x) => x.type === b?.type);
+    if (!bdef) { if (b?.type) notes.push(`${def.type}: block "${String(b.type)}" not allowed, dropped`); continue; }
+    if (bdef.limit && already.filter((x) => x === bdef.type).length + blocks.filter((x) => x.type === bdef.type).length >= bdef.limit) continue;
+    if (def.maxBlocks && already.length + blocks.length >= def.maxBlocks) break;
+    blocks.push({ type: bdef.type, settings: checkSettings(bdef.settings, b.settings, assets, notes) });
+  }
+  return blocks;
+}
+
+function checkSectionList(raw: unknown, lookup: (type: string) => SectionDef | undefined, assets: PlanAssets, notes: string[], max: number): PlanSection[] {
+  const sections: PlanSection[] = [];
+  for (const s of (Array.isArray(raw) ? raw : []) as Record<string, unknown>[]) {
+    const type = typeof s?.type === 'string' ? s.type : '';
+    const def = lookup(type);
+    if (!def) { notes.push(`section "${type}": not allowed here, dropped`); continue; }
+    sections.push({ type, settings: checkSettings(def.settings, s.settings, assets, notes), blocks: checkBlocks(def, s.blocks, assets, notes) });
+    if (sections.length >= max) break;
+  }
+  return sections;
 }
 
 // ── The prompt ────────────────────────────────────────────────
@@ -127,9 +156,9 @@ function describeSettings(defs: SettingDef[], max: number): string {
 }
 
 export const PLAN_SYSTEM = `You fill a Shopify theme's settings for a merchant so the home page looks like a given style sheet. You get the theme's REAL setting ids and section types; use ONLY those ids and types, exactly as written. Output one JSON object, nothing else:
-{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}],"groups":{"<group file>":{"<section key>":{"<id>":<value>}}},"notes":["<a style-sheet section this theme cannot show, and why>"]}
+{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}],"groups":{"<group file>":{"<section key>":{"<id>":<value>}}},"templates":{"product":{"existing":{"<section key>":{"settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{}}]}},"add":[{"type":"<section type>","settings":{},"blocks":[]}]},"collection":{"existing":{},"add":[]}},"notes":["<a style-sheet section or product feature this theme cannot show, and why / which app does it>"]}
 Values: colours as "#rrggbb"; fonts as the font NAME (e.g. "Poppins"); images as "banner:<slot>" using only the slots listed; collections as the handle listed; products as the handle listed; text in English, short, the merchant's own (never the reference's words); booleans as true/false; select options exactly as listed.
-Sections: ONE theme section per style-sheet section, in the style sheet's order (up to 20; skip a style-sheet section only when this theme has no section type for it, and say so in a "notes" list). Map each to the closest theme section type: hero-banner -> image banner; slideshow -> slideshow with one slide block per listed hero slot (count slides); featured-collection -> featured collection with one listed collection; collection-list -> a collection list with as many collection blocks as the style sheet's count, one listed collection each (reuse collections if there are fewer); product-grid -> a featured collection / product grid with the collection "all" and the count as products to show; promo-banners -> a multi-image banner / collage / image grid with one banner slot per image; image-banner -> image banner with a banner slot; image-with-text -> image with text with a banner slot; before-after -> a compare / before-after section if the theme has one, else image with text; trust-badges -> an icon / multicolumn / text-columns section with one block per item, each block's text from the style sheet's items; multicolumn -> multicolumn with one block per item; rich-text -> rich text; video -> a video section only if the theme has one; marquee -> a scrolling / marquee / ticker text section with one block per item if the theme has one; announcement-bar -> NOT a home section: its items go into the header group's announcement bar; testimonials -> testimonials / reviews section or multicolumn; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter; logo-list / countdown / social-feed / blog -> only if the theme has such a section. Use the style sheet's count and items; text in the merchant's own voice. Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings; a collection list / collection block MUST carry its collection setting with a listed handle, one different collection per block, and a featured-collection section its collection too. groups: the header / footer sections the theme already has, by their key: set the logo (an image_picker named logo -> "banner:logo" when that slot exists), the announcement bar text to one short offer line in the merchant tone, the footer text / newsletter heading; change nothing else there. Leave a setting out rather than guess. Never invent an id.`;
+Sections: ONE theme section per style-sheet section, in the style sheet's order (up to 20; skip a style-sheet section only when this theme has no section type for it, and say so in a "notes" list). Map each to the closest theme section type: hero-banner -> image banner; slideshow -> slideshow with one slide block per listed hero slot (count slides); featured-collection -> featured collection with one listed collection; collection-list -> a collection list with as many collection blocks as the style sheet's count, one listed collection each (reuse collections if there are fewer); product-grid -> a featured collection / product grid with the collection "all" and the count as products to show; promo-banners -> a multi-image banner / collage / image grid with one banner slot per image; image-banner -> image banner with a banner slot; image-with-text -> image with text with a banner slot; before-after -> a compare / before-after section if the theme has one, else image with text; trust-badges -> an icon / multicolumn / text-columns section with one block per item, each block's text from the style sheet's items; multicolumn -> multicolumn with one block per item; rich-text -> rich text; video -> a video section only if the theme has one; marquee -> a scrolling / marquee / ticker text section with one block per item if the theme has one; announcement-bar -> NOT a home section: its items go into the header group's announcement bar; testimonials -> testimonials / reviews section or multicolumn; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter; logo-list / countdown / social-feed / blog -> only if the theme has such a section. Use the style sheet's count and items; text in the merchant's own voice. Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings; a collection list / collection block MUST carry its collection setting with a listed handle, one different collection per block, and a featured-collection section its collection too. groups: the header / footer sections the theme already has, by their key: set the logo (an image_picker named logo -> "banner:logo" when that slot exists), the announcement bar text to one short offer line in the merchant tone, the footer text / newsletter heading; change nothing else there. templates: the PRODUCT and COLLECTION page templates the theme already has: "existing" = by section key, settings to change and blocks to APPEND on those sections (never removed): on the main product section follow the style sheet's productPage.features (show the compare-at price / sale badge / savings, rating, tax line, vendor off, sticky add to cart, quantity, pickup / delivery info, share) and add blocks for an offer text line (productPage.offerLine), collapsible tabs (shipping, returns, size guide), trust icons; "add" = sections appended BELOW for productPage.sections / collectionPage.sections (faq / collapsible content, trust badges / icons, video, image with text, testimonials, product recommendations, newsletter), only the types listed for that template. What this theme cannot show (reviews, urgency, delivery-estimate, bundle offers need an app) goes in notes with the app's name. Leave a setting out rather than guess. Never invent an id.`;
 
 export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanAssets, storeName: string): string {
   const globals = theme.settings.filter((d) => RELEVANT_GLOBAL.has(d.type) && (d.type !== 'text' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'range' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'checkbox' || GLOBAL_ID_HINT.test(d.id)));
@@ -148,7 +177,50 @@ export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanA
     `GLOBAL SETTINGS you may set: ${describeSettings(globals, 80)}`,
     `SECTION TYPES you may use on the home page:`, ...sectionLines.slice(0, 80),
     ...groupLines(theme),
+    ...templateLines(theme),
   ].join('\n');
+}
+
+function templateLines(theme: ThemeSummary): string[] {
+  const out: string[] = [];
+  for (const [name, t] of Object.entries(theme.templates)) {
+    out.push(`TEMPLATE ${name} (templates/${name}.json): existing sections by key (keep; settings + appended blocks):`);
+    for (const sec of t.sections) {
+      const def = theme.allSections[sec.type];
+      if (!def) continue;
+      const blocks = def.blocks.map((b) => `${b.type}[${describeSettings(b.settings, 8)}]`).join('; ');
+      out.push(`- key ${sec.key} (type ${sec.type}): settings ${describeSettings(def.settings, 30)}${sec.blocks.length ? ` | has blocks: ${sec.blocks.map((b) => b.type).join(', ')}` : ''}${blocks ? ` | block types you may append: ${blocks}` : ''}`);
+    }
+    const addable = (theme.templateSections[name] || []).map((type) => theme.allSections[type]).filter(Boolean).slice(0, 40);
+    if (addable.length) out.push(`SECTION TYPES you may ADD on the ${name} page: ${addable.map((d) => `${d.type} ("${d.name}": ${describeSettings(d.settings, 8)}${d.blocks.length ? `; blocks ${d.blocks.map((b) => b.type).join('/')}` : ''})`).join('; ')}`);
+  }
+  return out;
+}
+
+// templates/<name>.json with the plan's changes: settings + appended blocks on existing sections, new sections at the end.
+export function applyTemplate(templateText: string, changes: PlanTemplate, imageUrls: Record<string, string>): string {
+  const j = JSON.parse(templateText.replace(/^\s*\/\*[\s\S]*?\*\/\s*/, ''));
+  const resolve = (v: unknown): unknown => (typeof v === 'string' && v.startsWith('banner:') ? imageUrls[v.slice(7)] : v);
+  const resolved = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, resolve(v)]).filter(([, v]) => v !== undefined));
+  let n = 0;
+  for (const [key, ch] of Object.entries(changes.existing || {})) {
+    const sec = j.sections?.[key];
+    if (!sec) continue;
+    sec.settings = { ...(sec.settings || {}), ...resolved(ch.settings || {}) };
+    if (ch.blocks?.length) {
+      sec.blocks = sec.blocks || {}; sec.block_order = Array.isArray(sec.block_order) ? sec.block_order : Object.keys(sec.blocks);
+      for (const b of ch.blocks) { const bk = `builder_${b.type.replace(/[^a-z0-9]/g, '_')}_${++n}`; sec.blocks[bk] = { type: b.type, settings: resolved(b.settings) }; sec.block_order.push(bk); }
+    }
+  }
+  j.order = Array.isArray(j.order) ? j.order : Object.keys(j.sections || {});
+  (changes.add || []).forEach((s, i) => {
+    const key = `builder_${i + 1}_${s.type.replace(/[^a-z0-9]/g, '_')}`;
+    const blocks: Record<string, unknown> = {}; const blockOrder: string[] = [];
+    s.blocks.forEach((b, k) => { const bk = `${b.type.replace(/[^a-z0-9]/g, '_')}_${k + 1}`; blocks[bk] = { type: b.type, settings: resolved(b.settings) }; blockOrder.push(bk); });
+    j.sections[key] = { type: s.type, settings: resolved(s.settings), ...(blockOrder.length ? { blocks, block_order: blockOrder } : {}) };
+    j.order.push(key);
+  });
+  return JSON.stringify(j, null, 2);
 }
 
 const GROUP_SETTING_TYPES = ['image_picker', 'text', 'richtext', 'inline_richtext', 'textarea', 'color', 'checkbox', 'select', 'url'];

@@ -11,7 +11,7 @@ import { fileCreateFromUrl, themeCreateFromUrl, themePublish, themeStatus } from
 import { ShopifyError, gidNumber } from '@/lib/shopify/client';
 import { readThemeZip, writeThemeZip } from './theme-zip';
 import { summarize, type ThemeSummary } from './theme-schema';
-import { applyGroup, applyPlan, FONT_HANDLES, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
+import { applyGroup, applyPlan, applyTemplate, FONT_HANDLES, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
 import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 const zipPath = (projectId: string, built: boolean) => path.join(uploadsDir(), 'themes', `${projectId}${built ? '-built' : ''}.zip`);
@@ -70,8 +70,8 @@ export async function savePlan(projectId: string, raw: unknown): Promise<ThemePl
 export async function editorSchema(projectId: string): Promise<{ theme: ThemeSummary; assets: PlanAssets; fonts: Record<string, string> } | null> {
   const theme = await themeSummaryFor(projectId);
   if (!theme) return null;
-  // Only the section schemas the groups use travel (allSections can be 100+ in a big theme).
-  const used = new Set(Object.values(theme.groups).flat().map((g) => g.type));
+  // Only the section schemas the groups and templates use or may add travel (allSections can be 100+ in a big theme).
+  const used = new Set([...Object.values(theme.groups).flat().map((g) => g.type), ...Object.values(theme.templates).flatMap((t) => t.sections.map((s) => s.type)), ...Object.values(theme.templateSections).flat()]);
   const allSections = Object.fromEntries(Object.entries(theme.allSections).filter(([t]) => used.has(t)));
   return { theme: { ...theme, allSections, index: null, currentSettings: {} }, assets: await assetsFor(projectId), fonts: FONT_HANDLES };
 }
@@ -93,6 +93,10 @@ export async function buildTheme(projectId: string): Promise<{ zipUrl: string; u
   collect(p.theme_plan.settings);
   for (const s of p.theme_plan.sections) { collect(s.settings); for (const b of s.blocks) collect(b.settings); }
   for (const byKey of Object.values(p.theme_plan.groups || {})) for (const settings of Object.values(byKey)) collect(settings);
+  for (const t of Object.values(p.theme_plan.templates || {})) {
+    for (const ex of Object.values(t.existing || {})) { collect(ex.settings || {}); for (const b of ex.blocks || []) collect(b.settings); }
+    for (const s of t.add || []) { collect(s.settings); for (const b of s.blocks) collect(b.settings); }
+  }
   if (slotsUsed.size) {
     const imgs = await query<{ path: string; alt: string }>(`SELECT path, alt FROM images WHERE project_id = $1 AND kind IN ('banner', 'logo') AND path <> ''`, [projectId]);
     for (const slot of slotsUsed) {
@@ -111,6 +115,10 @@ export async function buildTheme(projectId: string): Promise<{ zipUrl: string; u
   for (const [file, byKey] of Object.entries(p.theme_plan.groups || {})) {
     if (!files.groups[file]) continue;
     try { changed[`sections/${file}.json`] = applyGroup(files.groups[file], byKey, imageUrls); } catch (err) { warnings.push(`${file}: ${(err as Error).message}`); }
+  }
+  for (const [name, t] of Object.entries(p.theme_plan.templates || {})) {
+    if (!files.templates[name]) continue;
+    try { changed[`templates/${name}.json`] = applyTemplate(files.templates[name], t, imageUrls); } catch (err) { warnings.push(`templates/${name}.json: ${(err as Error).message}`); }
   }
   const built = await writeThemeZip(zip, files.prefix, changed);
   await writeFile(zipPath(projectId, true), built);
