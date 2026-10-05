@@ -86,6 +86,7 @@ done
 echo ""
 # Password hint: a wrong-password login is the usual first problem; confirm the length only.
 pw=$(get ADMIN_PASSWORD); [ -n "$pw" ] && echo "Password saved: ${#pw} characters (not shown)."
+sec=$(get SHOPIFY_CLIENT_SECRET); [ -n "$sec" ] && echo "Shopify client secret saved: starts with ${sec:0:10}... (compare with Shopify > App settings > Client secret, eye icon)."
 if [ -d /var/www/builder ] && pm2 describe builder > /dev/null 2>&1; then
   read -r -p "Apply these settings to the running app now? [Y/n]: " yn
   if [ -z "$yn" ] || [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then

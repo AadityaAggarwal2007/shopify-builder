@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   if (!secret || !clientId) return back('SHOPIFY_CLIENT_ID / SECRET are not set on the server');
   if (!verifyCallbackHmac(sp, secret)) {
     // pm2 logs builder: which params came and whether the secret has the expected shape (never the secret itself).
-    console.error('[shopify] callback hmac mismatch', { params: Array.from(sp.keys()).sort().join(','), secretShape: /^shpss_[0-9a-f]{32}$/.test(secret) ? 'ok' : `unexpected(${secret.length} chars)` });
+    console.error('[shopify] callback hmac mismatch', { params: Array.from(sp.keys()).sort().join(','), secretShape: /^shpss_[0-9a-f]{32}$/.test(secret) ? `ok, starts ${secret.slice(0, 10)}` : `unexpected(${secret.length} chars)` });
     return back('Shopify callback failed its signature check (is the Client secret on the server the current one? Rotate it in Shopify, paste the new one in configure.sh)');
   }
   const shop = normalizeShop(sp.get('shop') || '');
