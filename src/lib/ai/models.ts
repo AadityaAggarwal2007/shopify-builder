@@ -19,7 +19,7 @@ export function aiReady(): boolean {
   return !!process.env.AI_API_KEY;
 }
 export function getClient(): OpenAI {
-  return new OpenAI({ baseURL: aiBase(), apiKey: process.env.AI_API_KEY || 'missing', defaultHeaders: { 'HTTP-Referer': 'https://builder.shiptrack.store', 'X-Title': 'Shopify Builder' } });
+  return new OpenAI({ baseURL: aiBase(), apiKey: process.env.AI_API_KEY || 'missing', defaultHeaders: { 'HTTP-Referer': 'https://merchantbuild.in', 'X-Title': 'Shopify Builder' } });
 }
 export function isRetryable(err: unknown): boolean {
   const status = (err as { status?: number })?.status;

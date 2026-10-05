@@ -7,7 +7,7 @@
 # Assumes Node 20+, PM2, nginx, certbot and PostgreSQL are already there (ShipTrack's 1-server-setup.sh).
 # ═══════════════════════════════════════════════════════════════
 set -e
-DOMAIN="${DOMAIN:-builder.shiptrack.store}"
+DOMAIN="${DOMAIN:-merchantbuild.in}"
 REPO="${REPO:-https://github.com/AadityaAggarwal2007/shopify-builder.git}"
 APP_DIR=/var/www/builder
 UPLOADS=/var/www/builder-uploads
@@ -43,7 +43,7 @@ echo "[5/6] nginx site $DOMAIN -> 127.0.0.1:3001 (+ /uploads/ from $UPLOADS)"
 cat > /etc/nginx/sites-available/builder <<NGINX
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name $DOMAIN www.$DOMAIN;
 
     location /uploads/ {
         alias $UPLOADS/;
@@ -68,7 +68,7 @@ ln -sf /etc/nginx/sites-available/builder /etc/nginx/sites-enabled/builder
 nginx -t && systemctl reload nginx
 
 echo "[6/6] SSL (needs the DNS A record for $DOMAIN to point here already)"
-certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "admin@shiptrack.store" --redirect || echo "    certbot failed (DNS not ready?). Run later: certbot --nginx -d $DOMAIN --redirect"
+certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --email "admin@merchantbuild.in" --redirect || echo "    certbot failed (DNS not ready?). Run later: certbot --nginx -d $DOMAIN --redirect"
 
 echo ""
 echo "Done. Next: fill $ENV_DIR/.env, then: cd $APP_DIR && bash vps-setup/deploy.sh"

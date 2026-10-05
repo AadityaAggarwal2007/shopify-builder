@@ -1,7 +1,7 @@
 # Shopify Builder
 
 Internal tool for the ShipTrack team: build a Shopify store from a product CSV, drag-and-drop photos,
-banners and a reference website. Lives at `https://builder.shiptrack.store` on the same VPS as ShipTrack.
+banners and a reference website. Lives at `https://merchantbuild.in` on the same VPS as ShipTrack.
 
 Read `AGENTS.md` first: it is the rulebook for any AI or person working in this repo.
 

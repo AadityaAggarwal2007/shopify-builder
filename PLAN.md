@@ -14,7 +14,7 @@ Answers jo mile (2026-10-05):
 |---|---|
 | Kya | Shopify store khud banaye: products, theme look, pages + policies + menu, store settings |
 | Kiske liye | Sirf apni team (SaaS nahi) |
-| Kahan | Alag naya repo `shopify-builder`, wahi Hostinger VPS, `builder.shiptrack.store` |
+| Kahan | Alag naya repo `shopify-builder`, wahi Hostinger VPS, `merchantbuild.in` |
 | Shopify link | Apne stores, Admin API (owner khaali store dega) |
 | Reference se | Layout / sections, colors / fonts, likhne ka style + policies, products / categories ka idea |
 | AI | Text likhe (descriptions, policies, banner text); banners AI image se bhi bane |
@@ -118,7 +118,7 @@ Additive SQL files repo root me (`001-stores.sql` ...), `psql -f` se, ShipTrack 
 
 ### Hissa 1 (1 hafta): products end-to-end
 - Repo + skeleton + login + `vps-setup/` (port 3001, PM2 `builder`, `/var/www/builder`, `/etc/builder/.env`,
-  nginx `sites-available/builder` + certbot `builder.shiptrack.store`, DB `builder`, uploads dir).
+  nginx `sites-available/builder` + certbot `merchantbuild.in`, DB `builder`, uploads dir).
 - Store connect (OAuth + token paste) -> test -> encrypted save.
 - Project; CSV upload -> products grid (title, price, variants, photos, status chip).
 - Product card: photos drag-drop (multi, reorder, delete), edit title / price / tags, "AI description" (ek / sab).
@@ -140,7 +140,7 @@ Additive SQL files repo root me (`001-stores.sql` ...), `psql -f` se, ShipTrack 
 
 1. DNS: `builder` A record -> VPS IP.
 2. Naya GitHub repo `shopify-builder` (private) + is session ko access.
-3. Shopify Dev Dashboard me ek app "Shopify Builder" (custom distribution), redirect URL `https://builder.shiptrack.store/api/shopify/callback`,
+3. Shopify Dev Dashboard me ek app "Shopify Builder" (custom distribution), redirect URL `https://merchantbuild.in/api/shopify/callback`,
    client id + secret `/etc/builder/.env` me (`SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`); usi app ke liye theme exemption form bharna (main link + text dunga).
 4. Env: `ADMIN_PASSWORD`, `AUTH_TOKEN_SECRET`, `BUILDER_DATA_KEY`, `DATABASE_URL`, `AI_API_KEY`, `AI_IMAGE_MODEL`, `NEXT_PUBLIC_BASE_URL`.
 5. Ek dev / test store jisme pehle sab try ho.
