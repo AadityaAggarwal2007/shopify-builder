@@ -8,6 +8,8 @@ import ProductsStep from './_components/ProductsStep';
 import ReferenceStep from './_components/ReferenceStep';
 import ThemeStep from './_components/ThemeStep';
 import BannersStep from './_components/BannersStep';
+import PagesStep from './_components/PagesStep';
+import ChecklistStep from './_components/ChecklistStep';
 
 export interface ProjectInfo { id: string; name: string; store_name: string; shop_domain: string; reference_url: string | null }
 export interface Counts { products: number; pushed: number; errors: number; images: number; pending_images: number; described: number }
@@ -17,8 +19,8 @@ const STEPS: { key: string; label: string; soon?: boolean }[] = [
   { key: 'reference', label: 'Reference site' },
   { key: 'banners', label: 'Banners' },
   { key: 'theme', label: 'Theme' },
-  { key: 'pages', label: 'Pages & policies', soon: true },
-  { key: 'checklist', label: 'Checklist', soon: true },
+  { key: 'pages', label: 'Pages & policies' },
+  { key: 'checklist', label: 'Checklist' },
 ];
 
 export default function ProjectPage() {
@@ -65,6 +67,8 @@ export default function ProjectPage() {
               {step === 'reference' && <ReferenceStep projectId={id} onChange={load} />}
               {step === 'banners' && <BannersStep projectId={id} onChange={load} />}
               {step === 'theme' && <ThemeStep projectId={id} onChange={load} />}
+              {step === 'pages' && <PagesStep projectId={id} onChange={load} />}
+              {step === 'checklist' && <ChecklistStep projectId={id} />}
             </section>
           </div>
         </>

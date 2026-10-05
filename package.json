@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint",
-    "test": "node scripts/tests/csv.js && node scripts/tests/mapper.js && node scripts/tests/client.js && node scripts/tests/auth.js && node scripts/tests/reference.js && node scripts/tests/theme.js"
+    "test": "node scripts/tests/csv.js && node scripts/tests/mapper.js && node scripts/tests/client.js && node scripts/tests/auth.js && node scripts/tests/reference.js && node scripts/tests/theme.js && node scripts/tests/pages.js"
   },
   "dependencies": {
     "jszip": "^3.10.2",

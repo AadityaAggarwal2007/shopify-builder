@@ -19,13 +19,15 @@ const settingsSchema = JSON.stringify([
 const sections = {
   'image-banner': JSON.stringify({ name: 'Image banner', settings: [{ type: 'image_picker', id: 'image', label: 'Image' }, { type: 'select', id: 'image_height', options: [{ value: 'small' }, { value: 'large' }] }], blocks: [{ type: 'heading', name: 'Heading', limit: 1, settings: [{ type: 'inline_richtext', id: 'heading', default: 'x' }] }, { type: 'buttons', settings: [{ type: 'text', id: 'button_label_1' }, { type: 'url', id: 'button_link_1' }] }], max_blocks: 3, presets: [{ name: 'Image banner' }] }),
   'featured-collection': JSON.stringify({ name: 'Featured collection', settings: [{ type: 'inline_richtext', id: 'title' }, { type: 'collection', id: 'collection' }], presets: [{ name: 'x' }] }),
-  'header': JSON.stringify({ name: 'Header', settings: [], enabled_on: { groups: ['header'] } }),
+  'header': JSON.stringify({ name: 'Header', settings: [{ type: 'image_picker', id: 'logo', label: 'Logo' }, { type: 'range', id: 'logo_width', min: 50, max: 250, default: 100 }], enabled_on: { groups: ['header'] } }),
+  'announcement-bar': JSON.stringify({ name: 'Announcement', settings: [{ type: 'text', id: 'text', label: 'Text' }], enabled_on: { groups: ['header'] } }),
   'main-product': JSON.stringify({ name: 'Product', settings: [], enabled_on: { templates: ['product'] }, presets: [{ name: 'x' }] }),
   'no-preset': JSON.stringify({ name: 'Internal', settings: [] }),
 };
 const indexTemplate = '/* comment */\n' + JSON.stringify({ sections: { old: { type: 'rich-text', settings: {} } }, order: ['old'] });
 const settingsData = JSON.stringify({ current: { colors_accent_1: '#121212', other_setting: 5 }, presets: { Default: {} } });
-const theme = sch.summarize({ settingsSchema, settingsData, indexTemplate, sections });
+const headerGroup = '/* c */\n' + JSON.stringify({ type: 'header', name: 'Header group', sections: { announcement: { type: 'announcement-bar', settings: { text: 'Old' } }, header: { type: 'header', settings: { logo_width: 120 } } }, order: ['announcement', 'header'] });
+const theme = sch.summarize({ settingsSchema, settingsData, indexTemplate, sections, groups: { 'header-group': headerGroup, 'other': '{}' } });
 
 t('summarize: theme info, global settings with ids only, home-page sections only', () => {
   assert.strictEqual(theme.name, 'Dawn'); assert.strictEqual(theme.version, '15.0.0');
@@ -36,9 +38,31 @@ t('summarize: theme info, global settings with ids only, home-page sections only
   assert.strictEqual(theme.sections['image-banner'].blocks[0].limit, 1);
   assert.deepStrictEqual(theme.indexOrder, ['old']);
   assert.strictEqual(theme.currentSettings.other_setting, 5);
+  assert.deepStrictEqual(Object.keys(theme.groups), ['header-group'], 'only *-group files are groups');
+  assert.deepStrictEqual(theme.groups['header-group'].map((x) => `${x.key}:${x.type}`), ['announcement:announcement-bar', 'header:header']);
+  assert.ok(theme.allSections.header && theme.allSections['announcement-bar'] && !theme.sections.header, 'group sections known, never offered for the home page');
 });
 
 const assets = { banners: [{ slot: 'hero', alt: 'festive banner' }], collections: [{ handle: 'jhumkas', title: 'Jhumkas' }], products: [{ handle: 'red-shirt', title: 'Red' }] };
+const assetsWithLogo = { ...assets, banners: [...assets.banners, { slot: 'logo', alt: 'logo' }] };
+
+t('groups: the plan may only set settings of sections the header / footer group holds; applyGroup writes them, keeps the rest', () => {
+  const p = plan.validatePlan({ sections: [{ type: 'image-banner', settings: {} }], groups: {
+    'header-group': { header: { logo: 'banner:logo', logo_width: 150, nope: 1 }, announcement: { text: 'Free shipping above Rs 999' }, ghost: { text: 'x' } },
+    'footer-group': { footer: { text: 'x' } },
+  } }, theme, assetsWithLogo);
+  assert.deepStrictEqual(p.groups, { 'header-group': { header: { logo: 'banner:logo', logo_width: 150 }, announcement: { text: 'Free shipping above Rs 999' } } });
+  assert.ok(p.notes.some((n) => /ghost/.test(n)) && p.notes.some((n) => /footer-group/.test(n)) && p.notes.some((n) => /nope/.test(n)));
+  const out = JSON.parse(plan.applyGroup(headerGroup, p.groups['header-group'], { logo: 'shopify://shop_images/builder-logo.png' }));
+  assert.deepStrictEqual(out.order, ['announcement', 'header'], 'order untouched');
+  assert.deepStrictEqual(out.sections.header.settings, { logo_width: 150, logo: 'shopify://shop_images/builder-logo.png' });
+  assert.strictEqual(out.sections.announcement.settings.text, 'Free shipping above Rs 999');
+  assert.strictEqual(out.type, 'header', 'the group file keeps its own keys');
+  const none = plan.validatePlan({ sections: [{ type: 'image-banner', settings: {} }] }, theme, assets);
+  assert.deepStrictEqual(none.groups, {}, 'no groups in the answer = nothing changed');
+  const pr = plan.planPrompt(theme, { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [], collections: [], offers: [], policies: { shipping: '', refund: '' } }, assetsWithLogo, 'S');
+  assert.ok(pr.includes('GROUP header-group') && pr.includes('key header (type header)') && pr.includes('key announcement') && !pr.includes('logo_width'), 'the prompt names the group sections by key, image / text settings only');
+});
 
 t('validatePlan: keeps only real ids / types / options; images by slot; collections by handle; notes the rest', () => {
   const raw = {

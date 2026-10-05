@@ -11,7 +11,7 @@ import { fileCreateFromUrl, themeCreateFromUrl, themePublish, themeStatus } from
 import { ShopifyError, gidNumber } from '@/lib/shopify/client';
 import { readThemeZip, writeThemeZip } from './theme-zip';
 import { summarize, type ThemeSummary } from './theme-schema';
-import { applyPlan, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
+import { applyGroup, applyPlan, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
 import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 const zipPath = (projectId: string, built: boolean) => path.join(uploadsDir(), 'themes', `${projectId}${built ? '-built' : ''}.zip`);
@@ -72,6 +72,7 @@ export async function buildTheme(projectId: string): Promise<{ zipUrl: string; u
   const collect = (o: Record<string, unknown>) => { for (const v of Object.values(o)) if (typeof v === 'string' && v.startsWith('banner:')) slotsUsed.add(v.slice(7)); };
   collect(p.theme_plan.settings);
   for (const s of p.theme_plan.sections) { collect(s.settings); for (const b of s.blocks) collect(b.settings); }
+  for (const byKey of Object.values(p.theme_plan.groups || {})) for (const settings of Object.values(byKey)) collect(settings);
   if (slotsUsed.size) {
     const imgs = await query<{ path: string; alt: string }>(`SELECT path, alt FROM images WHERE project_id = $1 AND kind IN ('banner', 'logo') AND path <> ''`, [projectId]);
     for (const slot of slotsUsed) {
@@ -86,7 +87,12 @@ export async function buildTheme(projectId: string): Promise<{ zipUrl: string; u
     }
   }
   const out = applyPlan(theme, p.theme_plan, files.settingsData, imageUrls);
-  const built = await writeThemeZip(zip, files.prefix, { 'config/settings_data.json': out.settingsData, 'templates/index.json': out.indexJson });
+  const changed: Record<string, string> = { 'config/settings_data.json': out.settingsData, 'templates/index.json': out.indexJson };
+  for (const [file, byKey] of Object.entries(p.theme_plan.groups || {})) {
+    if (!files.groups[file]) continue;
+    try { changed[`sections/${file}.json`] = applyGroup(files.groups[file], byKey, imageUrls); } catch (err) { warnings.push(`${file}: ${(err as Error).message}`); }
+  }
+  const built = await writeThemeZip(zip, files.prefix, changed);
   await writeFile(zipPath(projectId, true), built);
   await query(`UPDATE projects SET theme_built_at = now(), updated_at = now() WHERE id = $1`, [projectId]);
   return { zipUrl: `${baseUrl()}/uploads/${zipRel(projectId, true)}`, uploaded, warnings };

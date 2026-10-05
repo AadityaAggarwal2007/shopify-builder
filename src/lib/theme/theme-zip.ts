@@ -10,6 +10,7 @@ export interface ThemeFiles {
   settingsData: string | null;     // config/settings_data.json
   indexTemplate: string | null;    // templates/index.json (Online Store 2.0) or null (legacy liquid)
   sections: Record<string, string>; // sections/<name>.liquid -> the {% schema %} JSON text
+  groups: Record<string, string>;   // sections/<name>.json (header-group / footer-group) -> JSON text
   prefix: string;                  // folder prefix inside the zip ('' or 'my-theme/')
   fileCount: number;
 }
@@ -32,7 +33,11 @@ export async function readThemeZip(buf: Buffer): Promise<{ zip: JSZip; files: Th
   if (prefix === null) throw new Error('This zip is not a Shopify theme (config/settings_schema.json not found)');
   const text = async (p: string) => { const f = zip.file(prefix + p); return f ? await f.async('string') : null; };
   const sections: Record<string, string> = {};
+  const groups: Record<string, string> = {};
+  const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const name of Object.keys(zip.files)) {
+    const g = name.match(new RegExp(`^${esc}sections/([a-z0-9_-]+)\\.json$`));
+    if (g) { groups[g[1]] = await zip.file(name)!.async('string'); continue; }
     const m = name.match(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}sections/([a-z0-9_-]+)\\.liquid$`));
     if (!m) continue;
     const liquid = await zip.file(name)!.async('string');
@@ -41,7 +46,7 @@ export async function readThemeZip(buf: Buffer): Promise<{ zip: JSZip; files: Th
   }
   return {
     zip,
-    files: { settingsSchema: await text('config/settings_schema.json'), settingsData: await text('config/settings_data.json'), indexTemplate: await text('templates/index.json'), sections, prefix, fileCount: Object.keys(zip.files).length },
+    files: { settingsSchema: await text('config/settings_schema.json'), settingsData: await text('config/settings_data.json'), indexTemplate: await text('templates/index.json'), sections, groups, prefix, fileCount: Object.keys(zip.files).length },
   };
 }
 

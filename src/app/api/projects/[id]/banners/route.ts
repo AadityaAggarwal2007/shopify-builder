@@ -7,11 +7,10 @@ import { query, queryOne } from '@/lib/db';
 import { removeStored, storeFromUrl, storeImage, uploadsDir, MAX_UPLOAD_BYTES } from '@/lib/uploads';
 import { bannerPrompt, generateImage, IMAGE_COST_USD } from '@/lib/ai/images';
 import type { StyleSheet } from '@/lib/reference/style-sheet';
+import { SLOTS, slotOk } from '@/lib/banners';
 
 export const maxDuration = 120;
 type Ctx = { params: { id: string } };
-export const SLOTS = ['logo', 'hero', 'hero_mobile', 'offer', 'about', 'collection_1', 'collection_2', 'collection_3', 'collection_4'];
-const slotOk = (s: unknown): s is string => typeof s === 'string' && SLOTS.includes(s);
 
 // Banners and the logo live in `images` with kind 'banner' / 'logo' and alt = "<slot>|<description>".
 export const GET = handle(async (request: NextRequest, { params }: Ctx) => {

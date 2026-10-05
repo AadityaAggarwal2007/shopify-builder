@@ -149,3 +149,58 @@ export async function themePublish(store: StoreAuth, themeId: string, opts?: Cli
     mutation BuilderThemePublish($id: ID!) { themePublish(id: $id) { theme { id } userErrors { field message } } }`, { id: themeId }, opts);
   assertNoUserErrors('themePublish', r.data.themePublish.userErrors);
 }
+
+// ── Pages, policies, menus (part 3) ───────────────────────────
+export async function pageByHandle(store: StoreAuth, handle: string, opts?: ClientOptions): Promise<string | null> {
+  const r = await shopifyGraphql<{ pages: { nodes: { id: string; handle: string }[] } }>(store, `
+    query BuilderPage($q: String!) { pages(first: 5, query: $q) { nodes { id handle } } }`, { q: `handle:${handle}` }, opts);
+  return r.data.pages.nodes.find((p) => p.handle === handle)?.id || null;
+}
+
+export async function pageUpsert(store: StoreAuth, handle: string, title: string, bodyHtml: string, opts?: ClientOptions): Promise<{ id: string; created: boolean }> {
+  const existing = await pageByHandle(store, handle, opts);
+  if (existing) {
+    const r = await shopifyGraphql<{ pageUpdate: { page: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+      mutation BuilderPageUpdate($id: ID!, $page: PageUpdateInput!) { pageUpdate(id: $id, page: $page) { page { id } userErrors { field message } } }`,
+      { id: existing, page: { title, body: bodyHtml, isPublished: true } }, opts);
+    assertNoUserErrors(`pageUpdate ${handle}`, r.data.pageUpdate.userErrors);
+    return { id: existing, created: false };
+  }
+  const r = await shopifyGraphql<{ pageCreate: { page: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderPageCreate($page: PageCreateInput!) { pageCreate(page: $page) { page { id } userErrors { field message } } }`,
+    { page: { title, handle, body: bodyHtml, isPublished: true } }, opts);
+  assertNoUserErrors(`pageCreate ${handle}`, r.data.pageCreate.userErrors);
+  const id = r.data.pageCreate.page?.id;
+  if (!id) throw new Error(`pageCreate ${handle}: no id`);
+  return { id, created: true };
+}
+
+export async function shopPolicyUpdate(store: StoreAuth, type: string, bodyHtml: string, opts?: ClientOptions): Promise<void> {
+  const r = await shopifyGraphql<{ shopPolicyUpdate: { shopPolicy: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderPolicy($shopPolicy: ShopPolicyInput!) { shopPolicyUpdate(shopPolicy: $shopPolicy) { shopPolicy { id } userErrors { field message } } }`,
+    { shopPolicy: { type, body: bodyHtml } }, opts);
+  assertNoUserErrors(`shopPolicyUpdate ${type}`, r.data.shopPolicyUpdate.userErrors);
+}
+
+export interface MenuItemIn { title: string; url: string }
+
+// The theme's main menu / footer menu, by handle: updated in place when it exists, else created.
+export async function menuUpsert(store: StoreAuth, handle: string, title: string, items: MenuItemIn[], opts?: ClientOptions): Promise<{ id: string; created: boolean }> {
+  const list = await shopifyGraphql<{ menus: { nodes: { id: string; handle: string }[] } }>(store, `query BuilderMenus { menus(first: 50) { nodes { id handle } } }`, {}, opts);
+  const existing = list.data.menus.nodes.find((m) => m.handle === handle);
+  const input = items.map((i) => ({ title: i.title, type: 'HTTP', url: i.url }));
+  if (existing) {
+    const r = await shopifyGraphql<{ menuUpdate: { menu: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+      mutation BuilderMenuUpdate($id: ID!, $title: String!, $items: [MenuItemUpdateInput!]!) { menuUpdate(id: $id, title: $title, items: $items) { menu { id } userErrors { field message } } }`,
+      { id: existing.id, title, items: input }, opts);
+    assertNoUserErrors(`menuUpdate ${handle}`, r.data.menuUpdate.userErrors);
+    return { id: existing.id, created: false };
+  }
+  const r = await shopifyGraphql<{ menuCreate: { menu: { id: string } | null; userErrors: { field: string[]; message: string }[] } }>(store, `
+    mutation BuilderMenuCreate($title: String!, $handle: String!, $items: [MenuItemCreateInput!]!) { menuCreate(title: $title, handle: $handle, items: $items) { menu { id } userErrors { field message } } }`,
+    { title, handle, items: input }, opts);
+  assertNoUserErrors(`menuCreate ${handle}`, r.data.menuCreate.userErrors);
+  const id = r.data.menuCreate.menu?.id;
+  if (!id) throw new Error(`menuCreate ${handle}: no id`);
+  return { id, created: true };
+}

@@ -6,7 +6,7 @@ import { api, token } from '@/lib/client';
 interface State {
   has_zip: boolean; has_style: boolean;
   theme: { name: string; version: string; sections: string[]; settings: number; index_sections: number } | null;
-  plan: { settings: Record<string, unknown>; sections: { type: string; settings: Record<string, unknown>; blocks: { type: string }[] }[]; notes: string[] } | null;
+  plan: { settings: Record<string, unknown>; sections: { type: string; settings: Record<string, unknown>; blocks: { type: string }[] }[]; groups?: Record<string, Record<string, Record<string, unknown>>>; notes: string[] } | null;
   built_at: string | null; shopify_theme_id: string | null; preview_url: string | null;
 }
 
@@ -84,6 +84,7 @@ export default function ThemeStep({ projectId, onChange }: { projectId: string; 
                 <tbody>{st.plan.sections.map((s, i) => <tr key={i}><td>{i + 1}</td><td className="mono small">{s.type}</td><td className="small">{Object.entries(s.settings).map(([k, v]) => `${k}=${typeof v === 'string' ? v.slice(0, 40) : JSON.stringify(v)}`).join(' · ')}</td><td className="small">{s.blocks.map((b) => b.type).join(', ')}</td></tr>)}</tbody>
               </table>
               <div className="small" style={{ marginTop: 6 }}><b>Theme settings:</b> {Object.entries(st.plan.settings).map(([k, v]) => `${k}=${String(v)}`).join(' · ') || '—'}</div>
+              {Object.entries(st.plan.groups || {}).map(([file, byKey]) => <div key={file} className="small" style={{ marginTop: 6 }}><b>{file}:</b> {Object.entries(byKey).map(([key, settings]) => `${key} (${Object.entries(settings).map(([k, v]) => `${k}=${typeof v === 'string' ? v.slice(0, 40) : JSON.stringify(v)}`).join(', ')})`).join(' · ')}</div>)}
               {st.plan.notes.length > 0 && <div className="small muted" style={{ marginTop: 6 }}><b>Left out:</b> {st.plan.notes.slice(0, 20).join(' · ')}</div>}
             </details>
           )}

@@ -5,7 +5,7 @@ import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 export interface PlanBlock { type: string; settings: Record<string, unknown> }
 export interface PlanSection { type: string; settings: Record<string, unknown>; blocks: PlanBlock[] }
-export interface ThemePlan { settings: Record<string, unknown>; sections: PlanSection[]; notes: string[] }
+export interface ThemePlan { settings: Record<string, unknown>; sections: PlanSection[]; groups: Record<string, Record<string, Record<string, unknown>>>; notes: string[] }  // groups: file -> section key -> settings
 
 export interface PlanAssets {
   banners: { slot: string; alt: string }[];           // uploaded banners / logo by slot (hero, hero_mobile, offer, logo, collection_1 ...)
@@ -100,7 +100,21 @@ export function validatePlan(raw: unknown, theme: ThemeSummary, assets: PlanAsse
     if (sections.length >= 12) break;
   }
   if (!sections.length) throw new Error('The AI proposed no section this theme has');
-  return { settings, sections, notes };
+  // Header / footer groups: only settings of sections that already exist in the group, by key.
+  const groups: ThemePlan['groups'] = {};
+  const rawGroups = (j.groups && typeof j.groups === 'object' ? j.groups : {}) as Record<string, Record<string, unknown>>;
+  for (const [file, byKey] of Object.entries(rawGroups)) {
+    const held = theme.groups[file];
+    if (!held || !byKey || typeof byKey !== 'object') { notes.push(`group "${file}": not in this theme, dropped`); continue; }
+    for (const [key, raw] of Object.entries(byKey)) {
+      const sec = held.find((x) => x.key === key);
+      const def = sec ? theme.allSections[sec.type] : undefined;
+      if (!sec || !def) { notes.push(`${file}/${key}: no such section, dropped`); continue; }
+      const checked = checkSettings(def.settings, raw, assets, notes);
+      if (Object.keys(checked).length) (groups[file] ||= {})[key] = checked;
+    }
+  }
+  return { settings, sections, groups, notes };
 }
 
 // ── The prompt ────────────────────────────────────────────────
@@ -112,9 +126,9 @@ function describeSettings(defs: SettingDef[], max: number): string {
 }
 
 export const PLAN_SYSTEM = `You fill a Shopify theme's settings for a merchant so the home page looks like a given style sheet. You get the theme's REAL setting ids and section types; use ONLY those ids and types, exactly as written. Output one JSON object, nothing else:
-{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}]}
+{"settings":{"<global setting id>":<value>},"sections":[{"type":"<section type>","settings":{"<id>":<value>},"blocks":[{"type":"<block type>","settings":{"<id>":<value>}}]}],"groups":{"<group file>":{"<section key>":{"<id>":<value>}}}}
 Values: colours as "#rrggbb"; fonts as the font NAME (e.g. "Poppins"); images as "banner:<slot>" using only the slots listed; collections as the handle listed; products as the handle listed; text in English, short, the merchant's own (never the reference's words); booleans as true/false; select options exactly as listed.
-Sections: 5 to 9, in the style sheet's order, mapping each style-sheet section to the closest theme section type (hero-banner -> an image banner / slideshow type; featured-collection -> a featured collection type with one of the listed collections; collection-list -> a collection list with 3-6 listed collections; rich-text -> rich text; multicolumn -> multicolumn with 3 blocks of short benefits; image-with-text -> image with text using a banner slot; testimonials -> multicolumn or rich text; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter). Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings. Leave a setting out rather than guess. Never invent an id.`;
+Sections: 5 to 9, in the style sheet's order, mapping each style-sheet section to the closest theme section type (hero-banner -> an image banner / slideshow type; featured-collection -> a featured collection type with one of the listed collections; collection-list -> a collection list with 3-6 listed collections; rich-text -> rich text; multicolumn -> multicolumn with 3 blocks of short benefits; image-with-text -> image with text using a banner slot; testimonials -> multicolumn or rich text; faq -> collapsible content with 3-4 blocks; newsletter -> newsletter). Add the blocks a section needs (headings, text, buttons, columns, collection blocks) with their settings; a collection list / collection block MUST carry its collection setting with a listed handle, one different collection per block, and a featured-collection section its collection too. groups: the header / footer sections the theme already has, by their key: set the logo (an image_picker named logo -> "banner:logo" when that slot exists), the announcement bar text to one short offer line in the merchant tone, the footer text / newsletter heading; change nothing else there. Leave a setting out rather than guess. Never invent an id.`;
 
 export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanAssets, storeName: string): string {
   const globals = theme.settings.filter((d) => RELEVANT_GLOBAL.has(d.type) && (d.type !== 'text' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'range' || GLOBAL_ID_HINT.test(d.id)) && (d.type !== 'checkbox' || GLOBAL_ID_HINT.test(d.id)));
@@ -132,10 +146,39 @@ export function planPrompt(theme: ThemeSummary, style: StyleSheet, assets: PlanA
     `THEME: ${theme.name} ${theme.version}`,
     `GLOBAL SETTINGS you may set: ${describeSettings(globals, 80)}`,
     `SECTION TYPES you may use on the home page:`, ...sectionLines.slice(0, 40),
+    ...groupLines(theme),
   ].join('\n');
 }
 
+const GROUP_SETTING_TYPES = ['image_picker', 'text', 'richtext', 'inline_richtext', 'textarea', 'color', 'checkbox', 'select', 'url'];
+
+function groupLines(theme: ThemeSummary): string[] {
+  const out: string[] = [];
+  for (const [file, held] of Object.entries(theme.groups)) {
+    if (!held.length) continue;
+    out.push(`GROUP ${file} (existing sections, settings only; refer to them by key):`);
+    for (const sec of held) {
+      const def = theme.allSections[sec.type];
+      if (!def) continue;
+      const relevant = def.settings.filter((d) => GROUP_SETTING_TYPES.includes(d.type)).slice(0, 25);
+      out.push(`- key ${sec.key} (type ${sec.type}): ${describeSettings(relevant, 25)}`);
+    }
+  }
+  return out;
+}
+
 // ── Applying the plan to the theme files ─────────────────────
+export function applyGroup(groupText: string, changes: Record<string, Record<string, unknown>>, imageUrls: Record<string, string>): string {
+  const j = JSON.parse(groupText.replace(/^\s*\/\*[\s\S]*?\*\/\s*/, ''));
+  const resolve = (v: unknown): unknown => (typeof v === 'string' && v.startsWith('banner:') ? imageUrls[v.slice(7)] : v);
+  for (const [key, settings] of Object.entries(changes)) {
+    if (!j.sections?.[key]) continue;
+    const next = Object.entries(settings).map(([k, v]) => [k, resolve(v)] as const).filter(([, v]) => v !== undefined);
+    j.sections[key].settings = { ...(j.sections[key].settings || {}), ...Object.fromEntries(next) };
+  }
+  return JSON.stringify(j, null, 2);
+}
+
 export function applyPlan(theme: ThemeSummary, plan: ThemePlan, settingsDataText: string | null, imageUrls: Record<string, string>): { settingsData: string; indexJson: string } {
   // settings_data.json: keep everything, overwrite `current` keys the plan sets.
   let data: Record<string, unknown> = {};

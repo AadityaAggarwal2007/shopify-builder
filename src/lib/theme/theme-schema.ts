@@ -10,7 +10,9 @@ export interface SectionDef {
 export interface ThemeSummary {
   name: string; version: string;
   settings: SettingDef[];                // global settings with an id
-  sections: Record<string, SectionDef>;  // by type (file name)
+  sections: Record<string, SectionDef>;  // home page section types (with presets, allowed on index)
+  allSections: Record<string, SectionDef>; // every section with a schema (the header / footer groups use them)
+  groups: Record<string, GroupSection[]>;  // header-group / footer-group: the sections they hold, in order
   currentSettings: Record<string, unknown>;  // settings_data.json current
   indexOrder: string[];                  // templates/index.json order (section keys)
   index: IndexTemplate | null;
@@ -80,11 +82,26 @@ export function parseSettingsData(text: string | null): Record<string, unknown> 
   }
 }
 
-export function summarize(files: { settingsSchema: string | null; settingsData: string | null; indexTemplate: string | null; sections: Record<string, string> }): ThemeSummary {
+export interface GroupSection { key: string; type: string; settings: Record<string, unknown> }
+
+export function parseGroup(text: string): GroupSection[] {
+  try {
+    const j = JSON.parse(text.replace(/^\s*\/\*[\s\S]*?\*\/\s*/, ''));
+    if (!j?.sections || !Array.isArray(j.order)) return [];
+    return (j.order as string[]).map((key) => ({ key, type: String(j.sections[key]?.type || ''), settings: (j.sections[key]?.settings || {}) as Record<string, unknown> })).filter((x) => x.type);
+  } catch {
+    return [];
+  }
+}
+
+export function summarize(files: { settingsSchema: string | null; settingsData: string | null; indexTemplate: string | null; sections: Record<string, string>; groups?: Record<string, string> }): ThemeSummary {
   if (!files.settingsSchema) throw new Error('config/settings_schema.json missing');
   const schema = parseSettingsSchema(files.settingsSchema);
   const sections: Record<string, SectionDef> = {};
-  for (const [type, text] of Object.entries(files.sections)) { const d = parseSectionSchema(type, text); if (d && d.presets && d.enabledOnIndex) sections[type] = d; }
+  const allSections: Record<string, SectionDef> = {};
+  for (const [type, text] of Object.entries(files.sections)) { const d = parseSectionSchema(type, text); if (!d) continue; allSections[type] = d; if (d.presets && d.enabledOnIndex) sections[type] = d; }
+  const groups: ThemeSummary['groups'] = {};
+  for (const [name, text] of Object.entries(files.groups || {})) if (/-group$/.test(name)) groups[name] = parseGroup(text);
   const index = parseIndexTemplate(files.indexTemplate);
-  return { name: schema.name, version: schema.version, settings: schema.settings, sections, currentSettings: parseSettingsData(files.settingsData), indexOrder: index ? index.order : [], index };
+  return { name: schema.name, version: schema.version, settings: schema.settings, sections, allSections, groups, currentSettings: parseSettingsData(files.settingsData), indexOrder: index ? index.order : [], index };
 }
