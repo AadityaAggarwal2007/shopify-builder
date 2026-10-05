@@ -119,7 +119,7 @@ t('templates: existing product sections get settings + appended blocks within li
   assert.ok(!pr.includes('TEMPLATE product'), 'the home prompt no longer carries the templates');
   const tp = plan.planTemplatesPrompt(theme, { brand: { name: 'S', tagline: '' }, palette: { primary: '#000000', secondary: '#111111', accent: '#222222', background: '#ffffff', text: '#000000' }, fonts: { heading: 'Poppins', body: 'Inter' }, tone: 't', sections: [], collections: [], offers: [], policies: { shipping: '', refund: '' }, productPage: { features: ['rating'], offerLine: 'Buy 2 get 1', sections: [] } }, assets, 'S');
   assert.ok(tp.includes('TEMPLATE product') && tp.includes('key main (type main-product)') && tp.includes('has blocks: title, text') && tp.includes('you may ADD on the product page') && tp.includes('product-only') && tp.includes('Buy 2 get 1') && !tp.includes('SECTION TYPES you may use on the home page'));
-  assert.ok(/"templates"/.test(plan.PLAN_TEMPLATES_SYSTEM) && !/"templates"/.test(plan.PLAN_SYSTEM));
+  assert.ok(/"templates":\{"product"/.test(plan.PLAN_TEMPLATES_SYSTEM) && !/"templates":\{"product"/.test(plan.PLAN_SYSTEM) && /leave "templates" out/.test(plan.PLAN_SYSTEM));
 });
 
 t('applyPlan: settings_data keeps the rest, index.json has the new sections in order, banner tokens resolved', () => {
