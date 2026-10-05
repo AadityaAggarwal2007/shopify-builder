@@ -12,22 +12,23 @@ CRED=$ENV_DIR/db-credentials.txt
 mkdir -p "$ENV_DIR"; chmod 700 "$ENV_DIR"
 touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
 
-get() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- ; }
+# Values are written in single quotes: Next.js reads the env file like dotenv, where an unquoted
+# `$x` expands and `#` starts a comment, which silently broke a password. Single quotes keep the
+# value exactly as typed (a value may not contain a single quote itself).
+unquote() { local v="$1"; v="${v#\'}"; v="${v%\'}"; v="${v#\"}"; v="${v%\"}"; printf '%s' "$v"; }
+get() { unquote "$(grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"; }
 set_kv() {
   local k="$1" v="$2"
-  if grep -qE "^$k=" "$ENV_FILE"; then
-    # replace the line without touching the rest (value may hold / and &)
-    local esc; esc=$(printf '%s' "$v" | sed -e 's/[\/&]/\\&/g')
-    sed -i "s/^$k=.*/$k=$esc/" "$ENV_FILE"
-  else
-    echo "$k=$v" >> "$ENV_FILE"
-  fi
+  case "$v" in *"'"*) echo "   A single quote (') is not allowed in $k; try again."; return 1;; esac
+  grep -vE "^$k=" "$ENV_FILE" > "$ENV_FILE.tmp" 2>/dev/null || true
+  printf "%s='%s'\n" "$k" "$v" >> "$ENV_FILE.tmp"
+  mv "$ENV_FILE.tmp" "$ENV_FILE"; chmod 600 "$ENV_FILE"
 }
 ask() {  # ask KEY "question" [secret]
   local k="$1" q="$2" secret="$3" cur; cur=$(get "$k")
   local hint=""; [ -n "$cur" ] && hint=" [Enter = keep current]"
   if [ "$secret" = "secret" ]; then read -r -s -p "$q$hint: " v; echo; else read -r -p "$q$hint: " v; fi
-  if [ -n "$v" ]; then set_kv "$k" "$v"; elif [ -z "$cur" ]; then echo "   (left empty)"; fi
+  if [ -n "$v" ]; then set_kv "$k" "$v" || ask "$k" "$q" "$secret"; elif [ -z "$cur" ]; then echo "   (left empty)"; fi
 }
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -41,7 +42,7 @@ set_kv CODEX_URL "https://openrouter.ai/api"
 
 # Database: from setup.sh's credentials file
 if [ -z "$(get DATABASE_URL)" ] && [ -f "$CRED" ]; then
-  set_kv DATABASE_URL "$(grep -E '^DATABASE_URL=' "$CRED" | cut -d= -f2-)"
+  set_kv DATABASE_URL "$(unquote "$(grep -E '^DATABASE_URL=' "$CRED" | cut -d= -f2-)")"
   echo "✓ Database connection taken from $CRED"
 fi
 
@@ -59,7 +60,7 @@ echo "2) AI key (OpenRouter)"
 if [ -z "$(get AI_API_KEY)" ] && [ -f /etc/tracker/.env ] && grep -qE '^AI_API_KEY=.+' /etc/tracker/.env; then
   read -r -p "   Use ShipTrack's AI key (same OpenRouter bill)? [Y/n]: " yn
   if [ -z "$yn" ] || [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then
-    set_kv AI_API_KEY "$(grep -E '^AI_API_KEY=' /etc/tracker/.env | head -1 | cut -d= -f2-)"
+    set_kv AI_API_KEY "$(unquote "$(grep -E '^AI_API_KEY=' /etc/tracker/.env | head -1 | cut -d= -f2-)")"
     echo "   ✓ copied from ShipTrack (not shown)"
   fi
 fi
@@ -77,4 +78,14 @@ for k in DATABASE_URL NEXT_PUBLIC_BASE_URL ADMIN_USERNAME ADMIN_PASSWORD AUTH_TO
   if [ -n "$(get $k)" ]; then echo "   ✓ $k"; else echo "   ✗ $k  (empty)"; fi
 done
 echo ""
-echo "Next: cd /var/www/builder && bash vps-setup/deploy.sh"
+# Password hint: a wrong-password login is the usual first problem; confirm the length only.
+pw=$(get ADMIN_PASSWORD); [ -n "$pw" ] && echo "Password saved: ${#pw} characters (not shown)."
+if [ -d /var/www/builder ] && pm2 describe builder > /dev/null 2>&1; then
+  read -r -p "Apply these settings to the running app now? [Y/n]: " yn
+  if [ -z "$yn" ] || [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then
+    cp "$ENV_FILE" /var/www/builder/.env.production.local
+    pm2 restart builder --update-env > /dev/null && echo "✓ App restarted with the new settings. Try logging in."
+  fi
+else
+  echo "Next: cd /var/www/builder && bash vps-setup/deploy.sh"
+fi
