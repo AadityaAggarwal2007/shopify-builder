@@ -58,9 +58,10 @@ t('normalizeShop accepts every way of writing a store', () => {
 
 t('callback HMAC and the one-time state', () => {
   const secret = 'shhh';
-  const params = new URLSearchParams({ code: 'c', shop: 'x.myshopify.com', state: 's', timestamp: '1' });
-  const sorted = new URLSearchParams(params); sorted.sort();
-  const hmac = require('crypto').createHmac('sha256', secret).update(sorted.toString()).digest('hex');
+  // Real shape: host is base64 and ends with '=' (raw in the signed message), timestamp, code, state.
+  const params = new URLSearchParams({ code: 'c', host: 'YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUveA==', shop: 'x.myshopify.com', state: 's', timestamp: '1' });
+  assert.strictEqual(oauth.callbackMessage(params), 'code=c&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUveA==&shop=x.myshopify.com&state=s&timestamp=1');
+  const hmac = require('crypto').createHmac('sha256', secret).update(oauth.callbackMessage(params)).digest('hex');
   params.set('hmac', hmac);
   assert.strictEqual(oauth.verifyCallbackHmac(params, secret), true);
   params.set('hmac', hmac.replace(/^./, (ch) => (ch === 'a' ? 'b' : 'a')));

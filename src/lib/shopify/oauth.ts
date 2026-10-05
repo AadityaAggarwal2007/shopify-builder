@@ -34,14 +34,25 @@ export function authorizeUrl(shop: string, clientId: string, redirectUri: string
   }).toString();
 }
 
-// Shopify signs the callback's query string with the client secret (hex HMAC-SHA256 of the sorted
-// params without hmac). Constant-time compare.
+// Shopify signs the callback's query string with the client secret: hex HMAC-SHA256 over the
+// DECODED parameters (hmac removed), sorted by key, joined as key=value with &, where only & and %
+// are escaped in keys and values (and = in keys). URLSearchParams.toString() would percent-encode
+// the base64 `=` of the `host` value and break the check. Constant-time compare.
+export function callbackMessage(searchParams: URLSearchParams): string {
+  const esc = (s: string, key: boolean) => {
+    let out = s.replace(/%/g, '%25').replace(/&/g, '%26');
+    if (key) out = out.replace(/=/g, '%3D');
+    return out;
+  };
+  return Array.from(searchParams.entries())
+    .filter(([k]) => k !== 'hmac' && k !== 'signature')
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${esc(k, true)}=${esc(v, false)}`)
+    .join('&');
+}
 export function verifyCallbackHmac(searchParams: URLSearchParams, clientSecret: string): boolean {
   const hmac = searchParams.get('hmac') || '';
-  const params = new URLSearchParams(searchParams);
-  params.delete('hmac');
-  params.sort();
-  const expected = createHmac('sha256', clientSecret).update(params.toString()).digest('hex');
+  const expected = createHmac('sha256', clientSecret).update(callbackMessage(searchParams)).digest('hex');
   const a = Buffer.from(hmac), b = Buffer.from(expected);
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
