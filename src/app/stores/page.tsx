@@ -46,10 +46,14 @@ export default function StoresPage() {
     } catch (e) { setMsg({ kind: 'bad', text: (e as Error).message }); }
     setBusy(false);
   }
+  const [testing, setTesting] = useState('');
   async function test(s: Store) {
-    const r = await api<{ ok: boolean; error?: string; shop?: { name: string; plan: string } }>(`/api/stores/${s.id}`);
-    setMsg(r.ok ? { kind: 'ok', text: `${s.name}: connection OK (${r.shop?.plan || 'plan ?'})` } : { kind: 'bad', text: `${s.name}: ${r.error}` });
-    load();
+    setTesting(s.id); setMsg(null);
+    try {
+      const r = await api<{ ok: boolean; error?: string; shop?: { name: string; plan: string } }>(`/api/stores/${s.id}`);
+      setMsg(r.ok ? { kind: 'ok', text: `${s.name}: connection OK (${r.shop?.plan || 'plan ?'})` } : { kind: 'bad', text: `${s.name}: ${r.error}` });
+    } catch (e) { setMsg({ kind: 'bad', text: `${s.name}: ${(e as Error).message}` }); }
+    setTesting(''); load();
   }
   async function remove(s: Store) {
     if (!confirm(`Forget ${s.name} in this tool? Nothing changes in Shopify.`)) return;
@@ -91,7 +95,7 @@ export default function StoresPage() {
                   <td>{s.connected_via === 'oauth' ? 'Shopify app' : s.connected_via === 'client_credentials' ? 'Direct (auto-renews)' : 'Pasted token'}</td>
                   <td className="small">{fmtWhen(s.last_ok_at) || '—'}</td>
                   <td className="row" style={{ justifyContent: 'flex-end' }}>
-                    <button className="btn btn-sm" onClick={() => test(s)}><RefreshCw size={12} /> Test</button>
+                    <button className="btn btn-sm" disabled={testing === s.id} onClick={() => test(s)}><RefreshCw size={12} /> {testing === s.id ? 'Testing…' : 'Test'}</button>
                     <button className="btn btn-sm btn-danger" onClick={() => remove(s)}><Trash2 size={12} /></button>
                   </td>
                 </tr>
