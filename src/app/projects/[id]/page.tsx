@@ -7,6 +7,7 @@ import { api } from '@/lib/client';
 import ProductsStep from './_components/ProductsStep';
 import ReferenceStep from './_components/ReferenceStep';
 import ThemeStep from './_components/ThemeStep';
+import BannersStep from './_components/BannersStep';
 
 export interface ProjectInfo { id: string; name: string; store_name: string; shop_domain: string; reference_url: string | null }
 export interface Counts { products: number; pushed: number; errors: number; images: number; pending_images: number; described: number }
@@ -14,7 +15,7 @@ export interface Counts { products: number; pushed: number; errors: number; imag
 const STEPS: { key: string; label: string; soon?: boolean }[] = [
   { key: 'products', label: 'Products' },
   { key: 'reference', label: 'Reference site' },
-  { key: 'banners', label: 'Banners', soon: true },
+  { key: 'banners', label: 'Banners' },
   { key: 'theme', label: 'Theme' },
   { key: 'pages', label: 'Pages & policies', soon: true },
   { key: 'checklist', label: 'Checklist', soon: true },
@@ -62,6 +63,7 @@ export default function ProjectPage() {
             <section>
               {step === 'products' && <ProductsStep projectId={id} counts={counts} onChange={load} />}
               {step === 'reference' && <ReferenceStep projectId={id} onChange={load} />}
+              {step === 'banners' && <BannersStep projectId={id} onChange={load} />}
               {step === 'theme' && <ThemeStep projectId={id} onChange={load} />}
             </section>
           </div>
