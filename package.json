@@ -1,0 +1,32 @@
+{
+  "name": "shopify-builder",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "eslint",
+    "test": "node scripts/tests/csv.js && node scripts/tests/mapper.js && node scripts/tests/client.js && node scripts/tests/auth.js"
+  },
+  "dependencies": {
+    "lucide-react": "^1.7.0",
+    "next": "^14.2.35",
+    "openai": "^4.104.0",
+    "papaparse": "^5.5.3",
+    "pg": "^8.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.34.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.2",
+    "typescript": "^5"
+  }
+}
