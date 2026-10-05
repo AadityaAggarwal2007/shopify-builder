@@ -42,6 +42,8 @@ set_kv UPLOADS_DIR "/var/www/builder-uploads"
 set_kv CODEX_URL "https://openrouter.ai/api"
 
 # Database: from setup.sh's credentials file
+# setup.sh copies .env.example first, whose DATABASE_URL carries the placeholder PASSWORD: treat that as empty.
+case "$(get DATABASE_URL)" in ""|*":PASSWORD@"*) [ -f "$CRED" ] && set_kv DATABASE_URL "" ;; esac
 if [ -z "$(get DATABASE_URL)" ] && [ -f "$CRED" ]; then
   set_kv DATABASE_URL "$(unquote "$(grep -E '^DATABASE_URL=' "$CRED" | cut -d= -f2-)")"
   echo "✓ Database connection taken from $CRED"
