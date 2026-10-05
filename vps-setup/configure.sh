@@ -55,8 +55,15 @@ ask ADMIN_USERNAME "   Username (e.g. jatin)"
 ask ADMIN_PASSWORD "   Password (typing is hidden; 8+ characters)" secret
 
 echo ""
-echo "2) AI key (OpenRouter, same kind as ShipTrack's AI_API_KEY)"
-ask AI_API_KEY "   AI_API_KEY (sk-or-...)" secret
+echo "2) AI key (OpenRouter)"
+if [ -z "$(get AI_API_KEY)" ] && [ -f /etc/tracker/.env ] && grep -qE '^AI_API_KEY=.+' /etc/tracker/.env; then
+  read -r -p "   Use ShipTrack's AI key (same OpenRouter bill)? [Y/n]: " yn
+  if [ -z "$yn" ] || [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then
+    set_kv AI_API_KEY "$(grep -E '^AI_API_KEY=' /etc/tracker/.env | head -1 | cut -d= -f2-)"
+    echo "   ✓ copied from ShipTrack (not shown)"
+  fi
+fi
+[ -n "$(get AI_API_KEY)" ] || ask AI_API_KEY "   AI_API_KEY (sk-or-...)" secret
 
 echo ""
 echo "3) Shopify app (Dev Dashboard > your app > Settings: Client ID and Client secret)"
