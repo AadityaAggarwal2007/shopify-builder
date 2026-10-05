@@ -11,7 +11,7 @@ import { fileCreateFromUrl, themeCreateFromUrl, themePublish, themeStatus } from
 import { ShopifyError, gidNumber } from '@/lib/shopify/client';
 import { readThemeZip, writeThemeZip } from './theme-zip';
 import { summarize, type ThemeSummary } from './theme-schema';
-import { applyGroup, applyPlan, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
+import { applyGroup, applyPlan, FONT_HANDLES, planPrompt, PLAN_SYSTEM, validatePlan, type PlanAssets, type ThemePlan } from './theme-plan';
 import type { StyleSheet } from '@/lib/reference/style-sheet';
 
 const zipPath = (projectId: string, built: boolean) => path.join(uploadsDir(), 'themes', `${projectId}${built ? '-built' : ''}.zip`);
@@ -31,7 +31,7 @@ export async function themeSummaryFor(projectId: string): Promise<ThemeSummary |
   try { const buf = await readFile(zipPath(projectId, false)); return summarize((await readThemeZip(buf)).files); } catch { return null; }
 }
 
-async function assetsFor(projectId: string): Promise<PlanAssets> {
+export async function assetsFor(projectId: string): Promise<PlanAssets> {
   const banners = await query<{ alt: string }>(`SELECT alt FROM images WHERE project_id = $1 AND kind IN ('banner', 'logo') AND path <> '' ORDER BY position`, [projectId]);
   const collections = await query<{ handle: string; title: string }>(`SELECT handle, title FROM collections WHERE project_id = $1 AND enabled ORDER BY title`, [projectId]);
   const products = await query<{ handle: string; title: string }>(`SELECT handle, title FROM products WHERE project_id = $1 ORDER BY position LIMIT 40`, [projectId]);
@@ -54,6 +54,25 @@ export async function planTheme(projectId: string): Promise<ThemePlan> {
   const plan = validatePlan(raw, theme, assets);
   await query(`UPDATE projects SET theme_plan = $2, theme_built_at = NULL, updated_at = now() WHERE id = $1`, [projectId, JSON.stringify(plan)]);
   return plan;
+}
+
+// The owner's own edits from the theme editor: the same strict validation as the AI's answer, then saved.
+export async function savePlan(projectId: string, raw: unknown): Promise<ThemePlan> {
+  const theme = await themeSummaryFor(projectId);
+  if (!theme) throw new Error('Upload the theme zip first');
+  const plan = validatePlan(raw, theme, await assetsFor(projectId));
+  await query(`UPDATE projects SET theme_plan = $2, theme_built_at = NULL, updated_at = now() WHERE id = $1`, [projectId, JSON.stringify(plan)]);
+  return plan;
+}
+
+// What the editor needs: the theme's real settings / sections / groups and the pickers' choices.
+export async function editorSchema(projectId: string): Promise<{ theme: ThemeSummary; assets: PlanAssets; fonts: Record<string, string> } | null> {
+  const theme = await themeSummaryFor(projectId);
+  if (!theme) return null;
+  // Only the section schemas the groups use travel (allSections can be 100+ in a big theme).
+  const used = new Set(Object.values(theme.groups).flat().map((g) => g.type));
+  const allSections = Object.fromEntries(Object.entries(theme.allSections).filter(([t]) => used.has(t)));
+  return { theme: { ...theme, allSections, index: null, currentSettings: {} }, assets: await assetsFor(projectId), fonts: FONT_HANDLES };
 }
 
 // Uploads the plan's images to Shopify Files (fixed names), writes the new zip, returns its public URL.

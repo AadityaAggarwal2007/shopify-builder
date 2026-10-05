@@ -1,12 +1,13 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, ExternalLink, Rocket, Sparkles, Upload } from 'lucide-react';
+import { Download, ExternalLink, Pencil, Rocket, Sparkles, Upload } from 'lucide-react';
 import { api, token } from '@/lib/client';
+import ThemeEditor, { type Plan } from './ThemeEditor';
 
 interface State {
   has_zip: boolean; has_style: boolean;
   theme: { name: string; version: string; sections: string[]; settings: number; index_sections: number } | null;
-  plan: { settings: Record<string, unknown>; sections: { type: string; settings: Record<string, unknown>; blocks: { type: string }[] }[]; groups?: Record<string, Record<string, Record<string, unknown>>>; notes: string[] } | null;
+  plan: Plan | null;
   built_at: string | null; shopify_theme_id: string | null; preview_url: string | null;
 }
 
@@ -16,6 +17,7 @@ export default function ThemeStep({ projectId, onChange }: { projectId: string; 
   const [st, setSt] = useState<State | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'bad' | 'warn'; text: string }[]>([]);
+  const [editing, setEditing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const load = useCallback(() => api<State>(`/api/projects/${projectId}/theme`).then(setSt).catch((e) => setMsg([{ kind: 'bad', text: e.message }])), [projectId]);
   useEffect(() => { load(); }, [load]);
@@ -66,18 +68,20 @@ export default function ThemeStep({ projectId, onChange }: { projectId: string; 
             <li><b>Plan</b>: the AI maps the style sheet onto this theme's real settings and sections (nothing is sent yet).</li>
             <li><b>Build</b>: writes the new theme zip; banners / logo (step 3) go to Shopify Files.</li>
             <li><b>Send to store</b>: the zip becomes an unpublished theme in Shopify. <b>Preview</b> opens it. Nothing changes for customers.</li>
-            <li><b>Publish</b>: makes it the live theme.</li>
+            <li><b>Publish</b>: makes it the live theme. <b>Edit</b> opens every setting of the plan (sections, colours, fonts, header, footer) to change by hand; save, then Build → Send → Preview again.</li>
           </ol>
           <div className="row">
-            <button className="btn" disabled={!!busy || !st.has_style} onClick={() => run('plan')}><Sparkles size={14} /> {busy === 'plan' ? 'Planning… (30-60 s)' : st.plan ? 'Plan again' : '1. Plan'}</button>
+            <button className="btn" disabled={!!busy || !st.has_style} onClick={() => run('plan', st.plan ? 'Plan again with the AI? Your own edits to the current plan will be replaced.' : undefined)}><Sparkles size={14} /> {busy === 'plan' ? 'Planning… (30-60 s)' : st.plan ? 'Plan again' : '1. Plan'}</button>
+            {st.plan && <button className={`btn${editing ? ' btn-primary' : ''}`} disabled={!!busy} onClick={() => setEditing((e) => !e)}><Pencil size={14} /> {editing ? 'Close editor' : 'Edit'}</button>}
             <button className="btn" disabled={!!busy || !st.plan} onClick={() => run('build')}>{busy === 'build' ? 'Building…' : '2. Build zip'}</button>
             <button className="btn" disabled={!!busy || !st.built_at} onClick={() => run('push')}>{busy === 'push' ? 'Sending… (up to 1 min)' : '3. Send to store'}</button>
             {st.built_at && <a className="btn" href={`/api/projects/${projectId}/theme/download?token=${encodeURIComponent(token())}`}><Download size={14} /> Download zip</a>}
             {st.preview_url && <a className="btn" href={st.preview_url} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Preview</a>}
             <button className="btn btn-primary" disabled={!!busy || !st.shopify_theme_id} onClick={() => run('publish', 'Make this theme LIVE on the store for customers?')}><Rocket size={14} /> {busy === 'publish' ? 'Publishing…' : '4. Publish'}</button>
           </div>
-          {st.plan && (
-            <details style={{ marginTop: 12 }} open>
+          {st.plan && editing && <ThemeEditor projectId={projectId} plan={st.plan} onSaved={(p) => { setSt((s) => (s ? { ...s, plan: p, built_at: null } : s)); setMsg([{ kind: 'ok', text: `Saved${p.notes.length ? `; left out: ${p.notes.slice(0, 5).join(' · ')}` : ''}. Now Build zip → Send to store → Preview.` }]); onChange(); }} />}
+          {st.plan && !editing && (
+            <details style={{ marginTop: 12 }}>
               <summary className="muted small" style={{ cursor: 'pointer' }}>The plan: {st.plan.sections.length} sections, {Object.keys(st.plan.settings).length} settings{st.plan.notes.length ? `, ${st.plan.notes.length} note(s)` : ''}</summary>
               <table style={{ marginTop: 6 }}>
                 <thead><tr><th>#</th><th>Section type</th><th>Settings</th><th>Blocks</th></tr></thead>
