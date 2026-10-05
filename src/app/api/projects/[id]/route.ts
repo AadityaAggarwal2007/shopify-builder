@@ -15,7 +15,7 @@ export const GET = handle(async (request: NextRequest, { params }: Ctx) => {
       (SELECT count(*)::int FROM products WHERE project_id = $1 AND status = 'pushed') AS pushed,
       (SELECT count(*)::int FROM products WHERE project_id = $1 AND status = 'error') AS errors,
       (SELECT count(*)::int FROM images WHERE project_id = $1 AND kind = 'product' AND path <> '') AS images,
-      (SELECT count(*)::int FROM images WHERE project_id = $1 AND path = '') AS pending_images,
+      (SELECT count(*)::int FROM images WHERE project_id = $1 AND path = '' AND source = 'csv') AS pending_images,
       (SELECT count(*)::int FROM products WHERE project_id = $1 AND ai_described_at IS NOT NULL) AS described`, [project.id]);
   const lastRun = await queryOne(`SELECT id, step, started_at, finished_at, ok_count, fail_count FROM publish_runs WHERE project_id = $1 ORDER BY started_at DESC LIMIT 1`, [project.id]);
   return NextResponse.json({ project, counts, last_run: lastRun });

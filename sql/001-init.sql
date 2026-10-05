@@ -1,8 +1,10 @@
 -- Shopify Builder: first schema (2026-10-05). Additive, safe to run twice:
 --   sudo -u postgres psql -d builder -v ON_ERROR_STOP=1 -f sql/001-init.sql
 -- The database and role come from vps-setup/setup.sh (CREATE DATABASE builder OWNER builder_user).
+-- deploy.sh runs this as postgres; SET ROLE makes builder_user own every table (gen_random_uuid()
+-- is built into PostgreSQL 13+, no extension needed).
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+SET ROLE builder_user;
 
 -- A Shopify store the tool may write to. The token is an AES-256-GCM blob (src/lib/crypto.ts),
 -- never plain text.
